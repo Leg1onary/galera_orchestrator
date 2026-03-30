@@ -151,6 +151,84 @@ async def api_get_scenario():
 async def api_config():
     return load_config()
 
+@app.get("/api/nodes")
+async def api_nodes():
+    """Return list of configured nodes (without sensitive fields)."""
+    cfg = load_config()
+    nodes = []
+    for n in cfg.get("nodes", []):
+        nodes.append({
+            "id":       n.get("id"),
+            "name":     n.get("name", n.get("id")),
+            "host":     n.get("host", ""),
+            "port":     n.get("port", 3306),
+            "ssh_port": n.get("ssh_port", 22),
+            "ssh_user": n.get("ssh_user", "root"),
+            "enabled":  n.get("enabled", True),
+            "role":     n.get("role", "node"),
+        })
+    arb = cfg.get("arbitrator", {})
+    return {
+        "nodes": nodes,
+        "arbitrator": {
+            "enabled": arb.get("enabled", False),
+            "host":    arb.get("host", ""),
+            "ssh_port": arb.get("ssh_port", 22),
+        },
+        "cluster": cfg.get("cluster", {}),
+    }
+
+@app.get("/api/node/{node_id}/test-connection")
+async def test_connection(node_id: str):
+    """Test SSH + MariaDB connectivity for a node. Safe to call before saving."""
+    cfg  = load_config()
+    node = next((n for n in cfg.get("nodes", []) if n["id"] == node_id), None)
+    if not node:
+        raise HTTPException(404, f"Node '{node_id}' not found")
+
+    result = {"node_id": node_id, "ssh": None, "db": None, "errors": []}
+
+    # SSH check
+    try:
+        import paramiko
+        client = paramiko.SSHClient()
+        client.set_missing_host_key_policy(paramiko.AutoAddPolicy())
+        client.connect(
+            node.get("host", ""), port=int(node.get("ssh_port", 22)),
+            username=node.get("ssh_user", "root"),
+            key_filename=str(Path(node.get("ssh_key", "~/.ssh/id_rsa")).expanduser()),
+            timeout=6, banner_timeout=6,
+        )
+        _, so, _ = client.exec_command("echo ok", timeout=4)
+        out = so.read().decode().strip()
+        client.close()
+        result["ssh"] = {"ok": out == "ok", "message": "SSH connection successful" if out == "ok" else f"unexpected output: {out}"}
+    except Exception as e:
+        result["ssh"] = {"ok": False, "message": str(e)}
+        result["errors"].append(f"SSH: {e}")
+
+    # DB check
+    try:
+        import pymysql
+        db_cfg = cfg.get("db", {})
+        user   = node.get("db_user")   or db_cfg.get("user",     "monitor")
+        passwd = node.get("db_password") or db_cfg.get("password", "")
+        conn = pymysql.connect(
+            host=node["host"], port=int(node.get("port", 3306)),
+            user=user, password=passwd,
+            connect_timeout=4, read_timeout=4,
+        )
+        with conn.cursor() as cur:
+            cur.execute("SELECT 1")
+        conn.close()
+        result["db"] = {"ok": True, "message": f"MariaDB connection successful (user={user})"}
+    except Exception as e:
+        result["db"] = {"ok": False, "message": str(e)}
+        result["errors"].append(f"DB: {e}")
+
+    result["ok"] = result["ssh"]["ok"] and result["db"]["ok"]
+    return result
+
 # ── MODE SWITCH (real swap of nodes) ────────────────────────────
 class ModePayload(BaseModel):
     use_mock: bool

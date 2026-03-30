@@ -40,13 +40,33 @@ def get_cluster_status(cfg: dict) -> dict:
     arb_cfg   = cfg.get("arbitrator", {})
     results   = []
 
-    for n in nodes_cfg:
-        if not n.get("enabled", True):
-            continue
-        if USE_MOCK(cfg):
+    enabled_nodes = [n for n in nodes_cfg if n.get("enabled", True)]
+
+    if USE_MOCK(cfg):
+        # Mock — последовательно (быстро, нет смысла в параллелизме)
+        for n in enabled_nodes:
             results.append(mock_node_status(n["id"], n))
-        else:
-            results.append(_real_node_status(n, cfg))
+    else:
+        # Real — параллельный опрос всех нод одновременно
+        from concurrent.futures import ThreadPoolExecutor, as_completed
+        futures = {}
+        with ThreadPoolExecutor(max_workers=len(enabled_nodes) or 1) as pool:
+            for n in enabled_nodes:
+                fut = pool.submit(_real_node_status, n, cfg)
+                futures[fut] = n["id"]
+        # Собираем в порядке исходного списка (не as_completed — сохраняем порядок)
+        ordered = {n["id"]: None for n in enabled_nodes}
+        with ThreadPoolExecutor(max_workers=len(enabled_nodes) or 1) as pool:
+            fmap = {pool.submit(_real_node_status, n, cfg): n["id"] for n in enabled_nodes}
+            for fut, nid in fmap.items():
+                try:
+                    ordered[nid] = fut.result(timeout=10)
+                except Exception as e:
+                    ordered[nid] = {
+                        "id": nid, "name": nid, "host": "", "port": 3306,
+                        "online": False, "error": f"executor error: {e}"
+                    }
+        results = [ordered[n["id"]] for n in enabled_nodes]
 
     synced    = sum(1 for r in results if r.get("wsrep_local_state_comment") == "Synced")
     online    = sum(1 for r in results if r.get("online"))
@@ -91,9 +111,10 @@ def _real_node_status(node: dict, cfg: dict) -> dict:
         base["error"] = "pymysql not installed"
         return base
 
+    # Per-node credentials имеют приоритет над глобальными
     db_cfg = cfg.get("db", {})
-    user   = db_cfg.get("user", "monitor")
-    passwd = db_cfg.get("password", "")
+    user   = node.get("db_user")   or db_cfg.get("user",     "monitor")
+    passwd = node.get("db_password") or db_cfg.get("password", "")
 
     try:
         conn = pymysql.connect(

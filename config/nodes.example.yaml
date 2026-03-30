@@ -1,0 +1,47 @@
+cluster:
+  name: my-galera-cluster
+  environment: test   # test | prod
+
+# Список нод кластера
+nodes:
+  - id: gc01
+    name: gc01
+    host: 192.168.1.10    # IP ноды
+    port: 3306
+    ssh_port: 22
+    ssh_user: root
+    ssh_key: /home/user/.ssh/id_rsa    # абсолютный путь к ключу
+    db_user: monitor_user              # per-node (опционально, иначе берётся из db.user)
+    db_password: ""                    # per-node (опционально)
+    enabled: true
+
+  - id: gc02
+    name: gc02
+    host: 192.168.1.11
+    port: 3306
+    ssh_port: 22
+    ssh_user: root
+    ssh_key: /home/user/.ssh/id_rsa
+    enabled: true
+
+# Арбитр — только для PROD контура (env: prod)
+arbitrator:
+  enabled: false
+  host: 192.168.1.12
+  ssh_port: 22
+  ssh_user: root
+  ssh_key: /home/user/.ssh/id_rsa
+
+# Глобальные credentials для подключения к MariaDB
+# Создать пользователя: GRANT SELECT, PROCESS, REPLICATION CLIENT ON *.* TO 'monitor_user'@'%' IDENTIFIED BY 'strong_password';
+db:
+  user: monitor_user
+  password: CHANGE_ME
+
+settings:
+  poll_interval: 5    # секунды между опросами в real-режиме
+  use_mock: true      # true = mock (симуляция), false = real
+
+# Технические снапшоты — управляются автоматически, не редактировать вручную
+real_nodes: []
+mock_nodes: []

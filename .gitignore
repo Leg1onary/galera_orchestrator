@@ -1,7 +1,19 @@
 venv/
+.venv/
 __pycache__/
 *.pyc
+*.pyo
 .env
 *.egg-info/
 dist/
 .DS_Store
+*.log
+logs/
+
+# Конфиг с паролями и SSH-ключами — НЕ коммитим
+config/nodes.yaml
+
+# IDE
+.idea/
+.vscode/
+*.iml

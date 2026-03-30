@@ -451,8 +451,45 @@
             display: flex;
             flex-wrap: wrap;
             gap: var(--space-2);
-            padding-top: var(--space-4);
+            margin-top: var(--space-3);
+            padding-top: var(--space-3);
             border-top: 1px solid var(--border);
+        }
+        /* Второй ряд кнопок — без разделителя */
+        .node-actions + .node-actions {
+            margin-top: var(--space-1);
+            padding-top: var(--space-2);
+            border-top: none;
+        }
+
+        /* --- LOADING SPINNER --- */
+        .spin-dot {
+            display: inline-block;
+            width: 8px; height: 8px;
+            border-radius: 50%;
+            background: var(--primary);
+            animation: pulse-dot 1.2s ease-in-out infinite;
+        }
+        @keyframes pulse-dot {
+            0%,100% { opacity: 1; transform: scale(1); }
+            50%      { opacity: 0.3; transform: scale(0.6); }
+        }
+        .loading-row {
+            display: flex; align-items: center; gap: var(--space-2);
+            font-size: var(--text-xs); color: var(--text-muted);
+        }
+
+        /* --- ERROR BANNER --- */
+        .node-error-banner {
+            background: var(--error-dim);
+            border: 1px solid var(--error);
+            border-radius: var(--radius-md);
+            padding: var(--space-2) var(--space-3);
+            font-size: var(--text-xs);
+            color: var(--error);
+            font-family: var(--font-mono);
+            margin-bottom: var(--space-3);
+            word-break: break-all;
         }
 
         /* --- TOPOLOGY SVG --- */
@@ -856,6 +893,7 @@
                     </svg>
                     Обновить
                 </button>
+                <span class="spin-dot" id="loadingDot" style="display:none"></span>
                 <span id="lastUpdateTime" style="font-size:0.72rem;color:var(--color-text)">—</span>
             </div>
         </div>
@@ -1002,7 +1040,15 @@
                     <rect x="470" y="170" width="150" height="26" rx="6" id="topoN2Badge" style="fill:var(--success-dim)"/>
                     <text x="545" y="188" text-anchor="middle" font-family="Inter,sans-serif" font-size="12" font-weight="700" id="topoN2State" style="fill:var(--success)">SYNCED</text>
                     <!-- cluster size label -->
-                    <text x="350" y="290" text-anchor="middle" font-family="Inter,sans-serif" font-size="12" id="topoSizeLabel" style="fill:var(--text-muted)">Cluster Size: 2 · Status: Primary · Cert Failures: 0</text>
+                    <text x="350" y="295" text-anchor="middle" font-family="Inter,sans-serif" font-size="12" id="topoSizeLabel" style="fill:var(--text-muted)">Cluster Size: 2 · Status: Primary · Cert Failures: 0</text>
+                    <!-- Arbitrator (PROD only, hidden by default) -->
+                    <g id="topoArbRect" visibility="hidden">
+                        <rect x="275" y="240" width="150" height="70" rx="10" style="fill:var(--surface);stroke:var(--warning);stroke-width:2" id="topoArbRect"/>
+                        <text x="350" y="263" text-anchor="middle" font-family="Inter,sans-serif" font-size="13" font-weight="700" style="fill:var(--text)" id="topoArbLabel">garbd</text>
+                        <text x="350" y="279" text-anchor="middle" font-family="JetBrains Mono,monospace" font-size="10" style="fill:var(--text-muted)" id="topoArbHost">arbitrator</text>
+                        <rect x="290" y="285" width="120" height="20" rx="5" style="fill:var(--warning-dim)" id="topoArbBadge"/>
+                        <text x="350" y="299" text-anchor="middle" font-family="Inter,sans-serif" font-size="11" font-weight="700" style="fill:var(--warning)" id="topoArbState">RUNNING</text>
+                    </g>
                 </svg>
             </div>
 
@@ -1054,8 +1100,7 @@
                     <div class="form-group">
                         <label class="form-label">Нода для Rejoin</label>
                         <select class="form-input" id="rejoinNodeSelect">
-                            <option value="gc01">gc01 — 10.0.0.11</option>
-                            <option value="gc02">gc02 — 10.0.0.12</option>
+                            <option value="">— загрузка —</option>
                         </select>
                     </div>
                     <div class="form-group">
@@ -1372,7 +1417,7 @@
      ============================================================ -->
 <!-- Add Node Modal -->
 <div class="modal-overlay" id="addNodeModal">
-    <div class="modal">
+    <div class="modal" style="max-width:580px">
         <h2 class="modal-title">Добавить ноду</h2>
         <div class="form-row">
             <div class="form-group">
@@ -1380,8 +1425,8 @@
                 <input class="form-input" type="text" id="newNodeName" placeholder="gc03">
             </div>
             <div class="form-group">
-                <label class="form-label">IP-адрес</label>
-                <input class="form-input" type="text" id="newNodeHost" placeholder="10.0.0.13">
+                <label class="form-label">IP-адрес / hostname</label>
+                <input class="form-input" type="text" id="newNodeHost" placeholder="192.168.1.12">
             </div>
         </div>
         <div class="form-row">
@@ -1394,16 +1439,97 @@
                 <input class="form-input" type="number" id="newNodeSsh" value="22">
             </div>
         </div>
-        <div class="form-group">
-            <label class="form-label">Роль <span>опционально</span></label>
-            <select class="form-input" id="newNodeRole">
-                <option value="node">Node (полноправный член)</option>
-                <option value="arbitrator">Arbitrator (только кворум)</option>
-            </select>
+        <div class="form-row">
+            <div class="form-group">
+                <label class="form-label">SSH пользователь</label>
+                <input class="form-input" type="text" id="newNodeSshUser" value="root">
+            </div>
+            <div class="form-group">
+                <label class="form-label">SSH ключ (путь)</label>
+                <input class="form-input" type="text" id="newNodeSshKey" value="~/.ssh/id_rsa" placeholder="/home/user/.ssh/id_rsa">
+            </div>
         </div>
+        <div class="form-row">
+            <div class="form-group">
+                <label class="form-label">DB пользователь <span>опц.</span></label>
+                <input class="form-input" type="text" id="newNodeDbUser" placeholder="оставить пустым = глобальный">
+            </div>
+            <div class="form-group">
+                <label class="form-label">DB пароль <span>опц.</span></label>
+                <input class="form-input" type="password" id="newNodeDbPass" placeholder="">
+            </div>
+        </div>
+        <!-- Test connection result -->
+        <div id="newTestResult" style="min-height:24px"></div>
         <div class="modal-actions">
             <button class="btn btn-ghost" onclick="App.closeModal('addNodeModal')">Отмена</button>
+            <button class="btn btn-ghost" onclick="App.testNodeConnection('new')">
+                <svg width="14" height="14" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2"><circle cx="12" cy="12" r="10"/><polyline points="12 8 12 12 14 14"/></svg>
+                Test SSH
+            </button>
             <button class="btn btn-primary" onclick="App.confirmAddNode()">Добавить</button>
+        </div>
+    </div>
+</div>
+
+<!-- Edit Node Modal -->
+<div class="modal-overlay" id="editNodeModal">
+    <div class="modal" style="max-width:580px">
+        <h2 class="modal-title">Редактировать ноду</h2>
+        <input type="hidden" id="editNodeOrigId">
+        <div class="form-row">
+            <div class="form-group">
+                <label class="form-label">Имя ноды (ID)</label>
+                <input class="form-input" type="text" id="editNodeId" placeholder="gc01">
+            </div>
+            <div class="form-group">
+                <label class="form-label">Отображаемое имя</label>
+                <input class="form-input" type="text" id="editNodeName" placeholder="gc01">
+            </div>
+        </div>
+        <div class="form-row">
+            <div class="form-group">
+                <label class="form-label">IP-адрес / hostname</label>
+                <input class="form-input" type="text" id="editNodeHost" placeholder="192.168.1.10">
+            </div>
+            <div class="form-group">
+                <label class="form-label">Порт MariaDB</label>
+                <input class="form-input" type="number" id="editNodePort" value="3306">
+            </div>
+        </div>
+        <div class="form-row">
+            <div class="form-group">
+                <label class="form-label">SSH порт</label>
+                <input class="form-input" type="number" id="editNodeSsh" value="22">
+            </div>
+            <div class="form-group">
+                <label class="form-label">SSH пользователь</label>
+                <input class="form-input" type="text" id="editNodeSshUser" value="root">
+            </div>
+        </div>
+        <div class="form-group">
+            <label class="form-label">SSH ключ (путь)</label>
+            <input class="form-input" type="text" id="editNodeSshKey" placeholder="/home/user/.ssh/id_rsa">
+        </div>
+        <div class="form-row">
+            <div class="form-group">
+                <label class="form-label">DB пользователь <span>опц.</span></label>
+                <input class="form-input" type="text" id="editNodeDbUser" placeholder="оставить пустым = глобальный">
+            </div>
+            <div class="form-group">
+                <label class="form-label">DB пароль <span>опц.</span></label>
+                <input class="form-input" type="password" id="editNodeDbPass">
+            </div>
+        </div>
+        <!-- Test connection result -->
+        <div id="editTestResult" style="min-height:24px"></div>
+        <div class="modal-actions">
+            <button class="btn btn-ghost" onclick="App.closeModal('editNodeModal')">Отмена</button>
+            <button class="btn btn-ghost" onclick="App.testNodeConnection('edit')">
+                <svg width="14" height="14" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2"><circle cx="12" cy="12" r="10"/><polyline points="12 8 12 12 14 14"/></svg>
+                Test SSH
+            </button>
+            <button class="btn btn-primary" onclick="App.saveEditNode()">Сохранить</button>
         </div>
     </div>
 </div>
@@ -1744,13 +1870,18 @@
                 '<svg width="12" height="12" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2.5"><circle cx="12" cy="12" r="10"/><polyline points="12 8 12 12 14 14"/></svg>' +
                 'Ping</button>';
 
-            var actionsHtml = (
-                a('start',          'btn-success', '<polygon points="5 3 19 12 5 21 5 3"/>',       'Start') +
-                a('stop',           'btn-danger',  '<rect x="6" y="6" width="12" height="12"/>',  'Stop') +
-                a('restart',        'btn-warning', '<polyline points="23 4 23 10 17 10"/><path d="M20.49 15a9 9 0 1 1-.02-8.49"/>', 'Restart') +
-                a('rejoin',         'btn-primary', '<polyline points="23 4 23 10 17 10"/><path d="M20.49 15a9 9 0 1 1-.02-8.49"/>', 'Rejoin') +
-                a('set_read_only',  'btn-ghost',   '<rect x="3" y="11" width="18" height="11" rx="2"/><path d="M7 11V7a5 5 0 0 1 10 0v4"/>', 'R/O') +
-                a('set_read_write', 'btn-ghost',   '<rect x="3" y="11" width="18" height="11" rx="2"/><path d="M7 11V7a5 5 0 0 1 5-4.9"/>', 'R/W') +
+            // Строка 1: основные действия
+            var rowMain = (
+                a('start',   'btn-success', '<polygon points="5 3 19 12 5 21 5 3"/>',       'Start') +
+                a('stop',    'btn-danger',  '<rect x="6" y="6" width="12" height="12"/>',   'Stop') +
+                a('restart', 'btn-warning', '<polyline points="23 4 23 10 17 10"/><path d="M20.49 15a9 9 0 1 1-.02-8.49"/>', 'Restart') +
+                a('rejoin',  'btn-primary', '<polyline points="23 4 23 10 17 10"/><path d="M20.49 15a9 9 0 1 1-.02-8.49"/>', 'Rejoin')
+            );
+
+            // Строка 2: дополнительные действия
+            var rowExtra = (
+                a('set_read_only',  'btn-ghost', '<rect x="3" y="11" width="18" height="11" rx="2"/><path d="M7 11V7a5 5 0 0 1 10 0v4"/>', 'R/O') +
+                a('set_read_write', 'btn-ghost', '<rect x="3" y="11" width="18" height="11" rx="2"/><path d="M7 11V7a5 5 0 0 1 5-4.9"/>', 'R/W') +
                 btnPing
             );
 
@@ -1762,8 +1893,10 @@
                 '<span class="node-state-badge ' + bc + '">' + node.state + '</span>' +
                 '</div>' +
                 '</div>' +
+                (node.error ? '<div class="node-error-banner">⚠ ' + node.error + '</div>' : '') +
                 '<div class="node-metrics">' + metricsHtml + '</div>' +
-                '<div class="node-actions">' + actionsHtml + '</div>' +
+                '<div class="node-actions">' + rowMain + '</div>' +
+                '<div class="node-actions" style="padding-top:var(--space-1);border-top:none;margin-top:0">' + rowExtra + '</div>' +
                 '</div>';
         }
 
@@ -1812,28 +1945,58 @@
                 lbl.textContent = lineOk ? 'IST / SST' : 'DISCONNECTED';
             }
 
-            // node 1
+            // node 1 — обновляем имя, хост и состояние из данных
             var r1 = document.getElementById('topoN1Rect');
             var s1 = document.getElementById('topoN1State');
             var b1 = document.getElementById('topoN1Badge');
-            if (r1) r1.setAttribute('style', 'fill:var(--surface);stroke:' + svgColor(n0.state) + ';stroke-width:2');
-            if (s1) { s1.textContent = n0.state.toUpperCase(); s1.setAttribute('style', 'fill:' + svgColor(n0.state)); }
-            if (b1) b1.setAttribute('style', 'fill:' + svgBg(n0.state));
+            var nm1 = document.getElementById('topoN1Name');
+            var h1  = document.getElementById('topoN1Host');
+            if (r1)  r1.setAttribute('style', 'fill:var(--surface);stroke:' + svgColor(n0.state) + ';stroke-width:2');
+            if (s1)  { s1.textContent = n0.state.toUpperCase(); s1.setAttribute('style', 'fill:' + svgColor(n0.state)); }
+            if (b1)  b1.setAttribute('style', 'fill:' + svgBg(n0.state));
+            if (nm1) nm1.textContent = n0.name || n0.id || 'node1';
+            if (h1)  h1.textContent  = (n0.host || '') + ':' + (n0.port || 3306);
 
-            // node 2
-            var r2 = document.getElementById('topoN2Rect');
-            var s2 = document.getElementById('topoN2State');
-            var b2 = document.getElementById('topoN2Badge');
+            // node 2 — обновляем имя, хост и состояние из данных
+            var r2  = document.getElementById('topoN2Rect');
+            var s2  = document.getElementById('topoN2State');
+            var b2  = document.getElementById('topoN2Badge');
+            var nm2 = document.getElementById('topoN2Name');
+            var h2  = document.getElementById('topoN2Host');
             var n1s = n1 ? n1.state : 'Offline';
-            if (r2) r2.setAttribute('style', 'fill:var(--surface);stroke:' + svgColor(n1s) + ';stroke-width:2');
-            if (s2) { s2.textContent = n1s.toUpperCase(); s2.setAttribute('style', 'fill:' + svgColor(n1s)); }
-            if (b2) b2.setAttribute('style', 'fill:' + svgBg(n1s));
+            if (r2)  r2.setAttribute('style', 'fill:var(--surface);stroke:' + svgColor(n1s) + ';stroke-width:2');
+            if (s2)  { s2.textContent = n1s.toUpperCase(); s2.setAttribute('style', 'fill:' + svgColor(n1s)); }
+            if (b2)  b2.setAttribute('style', 'fill:' + svgBg(n1s));
+            if (nm2) nm2.textContent = n1 ? (n1.name || n1.id || 'node2') : '—';
+            if (h2)  h2.textContent  = n1 ? ((n1.host || '') + ':' + (n1.port || 3306)) : '—';
 
             // cluster size label
             var sz = document.getElementById('topoSizeLabel');
             if (sz && n0.metrics) {
                 sz.textContent = 'Cluster Size: ' + (n0.metrics.wsrep_cluster_size || '—') +
-                    ' · Status: ' + (n0.metrics.wsrep_cluster_status || '—') + ' · Cert Failures: 0';
+                    ' · Status: ' + (n0.metrics.wsrep_cluster_status || '—') +
+                    ' · Cert Failures: ' + (n0.metrics.wsrep_local_cert_failures || '0');
+            }
+
+            // Арбитр — отображаем в PROD контуре
+            var arbEl = document.getElementById('topoArbRect');
+            var arbLbl = document.getElementById('topoArbLabel');
+            var arb = clusterData.arbitrator;
+            if (arbEl) {
+                var arbVisible = (_env === 'prod' && arb && arb.enabled);
+                arbEl.setAttribute('visibility', arbVisible ? 'visible' : 'hidden');
+                if (arbLbl) arbLbl.setAttribute('visibility', arbVisible ? 'visible' : 'hidden');
+                var arbBadge = document.getElementById('topoArbBadge');
+                var arbState = document.getElementById('topoArbState');
+                if (arbVisible && arb) {
+                    var arbOnline = arb.online;
+                    var arbColor = arbOnline ? 'var(--success)' : 'var(--error)';
+                    arbEl.setAttribute('style', 'fill:var(--surface);stroke:' + arbColor + ';stroke-width:2');
+                    if (arbBadge) arbBadge.setAttribute('style', 'fill:' + (arbOnline ? 'var(--success-dim)' : 'var(--error-dim)'));
+                    if (arbState) { arbState.textContent = arbOnline ? 'RUNNING' : 'OFFLINE'; arbState.setAttribute('style', 'fill:' + arbColor); }
+                    var arbHost = document.getElementById('topoArbHost');
+                    if (arbHost) arbHost.textContent = arb.host || 'garbd';
+                }
             }
             // comparison table
             var tbl = document.getElementById('topoTable');
@@ -1880,23 +2043,46 @@
         function renderBootstrapCandidates() {
             var el = document.getElementById('bootstrapCandidates');
             if (!el) return;
-            // P0/P1 guard: нет нод
             if (!clusterData.nodes || clusterData.nodes.length === 0) {
                 el.innerHTML = '<p style="color:var(--text-muted);font-size:var(--text-sm)">Нет нод в конфигурации</p>';
+                // Очистить rejoin select тоже
+                _updateRejoinSelect([]);
                 return;
             }
+            // Подсветить кандидата (макс seqno)
+            var maxSeqno = -1;
+            clusterData.nodes.forEach(function(n) {
+                var s = parseInt((n.metrics && n.metrics.wsrep_last_committed) || 0);
+                if (s > maxSeqno) maxSeqno = s;
+            });
             el.innerHTML = clusterData.nodes.map(function(node, i) {
-                // P0 guard: node.metrics может отсутствовать (нода только добавлена / offline в Real)
                 var seqno = (node.metrics && node.metrics.wsrep_last_committed) ? node.metrics.wsrep_last_committed : '—';
+                var isCandidate = parseInt(seqno) === maxSeqno && maxSeqno > 0;
                 return '<label style="display:flex;align-items:center;gap:var(--space-3);background:var(--surface-2);' +
                     'border-radius:var(--radius-md);padding:var(--space-3) var(--space-4);cursor:pointer;' +
-                    'border:1px solid var(--border)">' +
-                    '<input type="radio" name="bootstrap" value="' + node.id + '" ' + (i===0?'checked':'') + '>' +
+                    'border:1px solid ' + (isCandidate ? 'var(--success)' : 'var(--border)') + '">' +
+                    '<input type="radio" name="bootstrap" value="' + node.id + '" ' + (isCandidate ? 'checked' : (i===0&&!isCandidate?'checked':'')) + '>' +
                     '<span style="font-weight:600">' + node.name + '</span>' +
+                    (isCandidate ? '<span style="font-size:var(--text-xs);color:var(--success);font-weight:700">★ кандидат</span>' : '') +
                     '<span style="font-family:var(--font-mono);font-size:var(--text-xs);color:var(--text-muted)">' + (node.host || '') + '</span>' +
-                    '<span style="margin-left:auto;font-family:var(--font-mono);font-size:var(--text-xs)">seqno: ' +
-                    seqno + '</span>' +
+                    '<span style="margin-left:auto;font-family:var(--font-mono);font-size:var(--text-xs)">seqno: ' + seqno + '</span>' +
                     '</label>';
+            }).join('');
+            // Обновить rejoin select
+            _updateRejoinSelect(clusterData.nodes);
+        }
+
+        function _updateRejoinSelect(nodes) {
+            var sel = document.getElementById('rejoinNodeSelect');
+            if (!sel) return;
+            if (!nodes || nodes.length === 0) {
+                sel.innerHTML = '<option value="">— нет нод —</option>';
+                return;
+            }
+            var prev = sel.value;
+            sel.innerHTML = nodes.map(function(n) {
+                return '<option value="' + n.id + '"' + (n.id === prev ? ' selected' : '') + '>' +
+                    n.name + ' — ' + (n.host || '?') + '</option>';
             }).join('');
         }
 
@@ -2397,6 +2583,8 @@
                 var sshUser = document.getElementById('newNodeSshUser') ? document.getElementById('newNodeSshUser').value.trim() : 'root';
                 var sshKey  = document.getElementById('newNodeSshKey')  ? document.getElementById('newNodeSshKey').value.trim()  : '~/.ssh/id_rsa';
                 if (!name || !host) { toast('error', 'Заполните Имя и IP-адрес'); return; }
+                // Валидация IP/hostname
+                if (!/^[a-zA-Z0-9._-]+$/.test(host)) { toast('error', 'IP/hostname содержит недопустимые символы'); return; }
                 var exists = clusterData.nodes.find(function(n) { return n.id === name || n.name === name; });
                 if (exists) { toast('error', 'Нода с таким именем уже существует'); return; }
                 var newNode = {
@@ -2437,7 +2625,130 @@
             },
 
             editNode: function(nodeId) {
-                toast('info', 'Редактирование: откройте nodes.yaml для ручного изменения');
+                // Ищем ноду в clusterData
+                var node = clusterData.nodes.find(function(n) { return n.id === nodeId; });
+                if (!node) { toast('error', 'Нода не найдена'); return; }
+
+                // Заполняем форму текущими значениями
+                var modal = document.getElementById('editNodeModal');
+                if (!modal) { toast('info', 'Открой nodes.yaml вручную'); return; }
+
+                document.getElementById('editNodeId').value       = node.id;
+                document.getElementById('editNodeOrigId').value   = node.id; // для DELETE при сохранении
+                document.getElementById('editNodeName').value     = node.name || node.id;
+                document.getElementById('editNodeHost').value     = node.host || '';
+                document.getElementById('editNodePort').value     = node.port || 3306;
+                document.getElementById('editNodeSsh').value      = node.ssh_port || node.ssh || 22;
+                document.getElementById('editNodeSshUser').value  = node.ssh_user || 'root';
+                document.getElementById('editNodeSshKey').value   = node.ssh_key || '~/.ssh/id_rsa';
+                document.getElementById('editNodeDbUser').value   = node.db_user || '';
+                document.getElementById('editNodeDbPass').value   = node.db_password || '';
+
+                // Сбрасываем результат теста
+                var tr = document.getElementById('editTestResult');
+                if (tr) tr.innerHTML = '';
+
+                modal.classList.add('open');
+            },
+
+            saveEditNode: function() {
+                var origId = document.getElementById('editNodeOrigId').value;
+                var name   = document.getElementById('editNodeName').value.trim();
+                var host   = document.getElementById('editNodeHost').value.trim();
+                var port   = parseInt(document.getElementById('editNodePort').value) || 3306;
+                var ssh    = parseInt(document.getElementById('editNodeSsh').value)  || 22;
+                var sshUser = document.getElementById('editNodeSshUser').value.trim() || 'root';
+                var sshKey  = document.getElementById('editNodeSshKey').value.trim()  || '~/.ssh/id_rsa';
+                var dbUser  = document.getElementById('editNodeDbUser').value.trim();
+                var dbPass  = document.getElementById('editNodeDbPass').value;
+
+                if (!name || !host) { toast('error', 'Заполните Имя и IP-адрес'); return; }
+
+                var apiBase = getApiBase();
+                // Удаляем старую запись и создаём новую (простейший "update")
+                fetch(apiBase + '/api/config/node/' + origId, { method: 'DELETE' })
+                    .catch(function(){})
+                    .finally(function() {
+                        fetch(apiBase + '/api/config/node', {
+                            method: 'POST',
+                            headers: { 'Content-Type': 'application/json' },
+                            body: JSON.stringify({
+                                id: name, name: name, host: host, port: port,
+                                ssh_port: ssh, ssh_user: sshUser, ssh_key: sshKey,
+                                db_user: dbUser || undefined, db_password: dbPass || undefined
+                            })
+                        })
+                        .then(function(r) { return r.json(); })
+                        .then(function() {
+                            // Обновляем локальный объект
+                            var node = clusterData.nodes.find(function(n) { return n.id === origId; });
+                            if (node) {
+                                node.id = name; node.name = name; node.host = host;
+                                node.port = port; node.ssh_port = ssh; node.ssh_user = sshUser;
+                                node.db_user = dbUser; node.db_password = dbPass;
+                            }
+                            App.closeModal('editNodeModal');
+                            renderAll();
+                            addLog('INFO', 'Нода обновлена: ' + name + ' (' + host + ')');
+                            toast('success', 'Нода ' + name + ' обновлена');
+                        })
+                        .catch(function(e) {
+                            toast('error', 'Ошибка сохранения: ' + e.message);
+                        });
+                    });
+            },
+
+            testNodeConnection: function(idPrefix) {
+                var host    = document.getElementById(idPrefix + 'NodeHost').value.trim();
+                var name    = document.getElementById(idPrefix + 'NodeName').value.trim() || 'test_node';
+                var ssh     = parseInt(document.getElementById(idPrefix + 'NodeSsh').value)  || 22;
+                var sshUser = document.getElementById(idPrefix + 'NodeSshUser') ? document.getElementById(idPrefix + 'NodeSshUser').value.trim() : 'root';
+                var sshKey  = document.getElementById(idPrefix + 'NodeSshKey')  ? document.getElementById(idPrefix + 'NodeSshKey').value.trim()  : '~/.ssh/id_rsa';
+                var port    = parseInt(document.getElementById(idPrefix + 'NodePort').value) || 3306;
+                var dbUser  = document.getElementById(idPrefix + 'NodeDbUser')  ? document.getElementById(idPrefix + 'NodeDbUser').value.trim()  : '';
+                var dbPass  = document.getElementById(idPrefix + 'NodeDbPass')  ? document.getElementById(idPrefix + 'NodeDbPass').value         : '';
+                var resEl   = document.getElementById(idPrefix + 'TestResult');
+
+                if (!host) { toast('error', 'Укажите IP-адрес'); return; }
+                if (resEl) resEl.innerHTML = '<span class="loading-row"><span class="spin-dot"></span> Проверяем соединение...</span>';
+
+                var apiBase = getApiBase();
+                // Временно сохраняем ноду для теста, потом удалим если нужно
+                var tmpId = '__test_' + Date.now();
+                fetch(apiBase + '/api/config/node', {
+                    method: 'POST',
+                    headers: { 'Content-Type': 'application/json' },
+                    body: JSON.stringify({
+                        id: tmpId, name: name, host: host, port: port,
+                        ssh_port: ssh, ssh_user: sshUser, ssh_key: sshKey,
+                        db_user: dbUser || undefined, db_password: dbPass || undefined
+                    })
+                })
+                .then(function() {
+                    return fetch(apiBase + '/api/node/' + tmpId + '/test-connection');
+                })
+                .then(function(r) { return r.json(); })
+                .then(function(res) {
+                    // Удаляем временную ноду
+                    fetch(apiBase + '/api/config/node/' + tmpId, { method: 'DELETE' }).catch(function(){});
+                    if (resEl) {
+                        var ssh_ok  = res.ssh && res.ssh.ok;
+                        var db_ok   = res.db  && res.db.ok;
+                        resEl.innerHTML =
+                            '<div style="display:flex;flex-direction:column;gap:4px;font-size:var(--text-xs);margin-top:var(--space-2)">' +
+                            '<span style="color:' + (ssh_ok ? 'var(--success)' : 'var(--error)') + '">' +
+                                (ssh_ok ? '✓' : '✗') + ' SSH: ' + (res.ssh ? res.ssh.message : '—') + '</span>' +
+                            '<span style="color:' + (db_ok  ? 'var(--success)' : 'var(--error)') + '">' +
+                                (db_ok  ? '✓' : '✗') + ' MariaDB: ' + (res.db  ? res.db.message  : '—') + '</span>' +
+                            '</div>';
+                    }
+                    toast(res.ok ? 'success' : 'warning', 'Тест: SSH ' + (ssh_ok?'OK':'FAIL') + ' / DB ' + (db_ok?'OK':'FAIL'));
+                })
+                .catch(function(e) {
+                    fetch(apiBase + '/api/config/node/__test_' + Date.now(), { method: 'DELETE' }).catch(function(){});
+                    if (resEl) resEl.innerHTML = '<span style="color:var(--error);font-size:var(--text-xs)">✗ Ошибка: ' + e.message + '</span>';
+                    toast('error', 'Тест не прошёл: ' + e.message);
+                });
             },
 
             removeNode: function(nodeId) {
@@ -2601,6 +2912,8 @@
         }
 
         function fetchRealData() {
+            var dot = document.getElementById('loadingDot');
+            if (dot) dot.style.display = 'inline-block';
             var apiBase = getApiBase();
             fetch(apiBase + '/api/status')
                 .then(function(r) { if (!r.ok) throw new Error('HTTP ' + r.status); return r.json(); })
@@ -2650,9 +2963,13 @@
                         var _syn = clusterData.nodes.filter(function(n){ return n.state === 'Synced'; }).length;
                         addLog('INFO', '[Real] Poll #' + _tickCount + ' — ' + _syn + '/' + clusterData.nodes.length + ' Synced');
                     }
+                    var dot2 = document.getElementById('loadingDot');
+                    if (dot2) dot2.style.display = 'none';
                     renderAll();
                 })
                 .catch(function(e) {
+                    var dot3 = document.getElementById('loadingDot');
+                    if (dot3) dot3.style.display = 'none';
                     addLog('WARN', 'API недоступен: ' + e.message);
                 });
         }

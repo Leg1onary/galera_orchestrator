@@ -811,6 +811,26 @@
             <span id="headerStatusText">TEST · Primary · 2/2</span>
         </div>
 
+        <div style="display:flex;align-items:center;gap:var(--space-2);margin-left:var(--space-4)">
+            <span style="font-size:var(--text-xs);font-weight:600;text-transform:uppercase;letter-spacing:.07em;color:var(--text-muted);white-space:nowrap">Опрос</span>
+            <select class="form-input" id="pollIntervalSelect" style="width:88px;height:32px;font-size:var(--text-xs);padding:0 var(--space-2)" onchange="App.setPollInterval(this.value)">
+                <option value="2">2 сек</option>
+                <option value="5" selected>5 сек</option>
+                <option value="10">10 сек</option>
+                <option value="30">30 сек</option>
+                <option value="60">60 сек</option>
+            </select>
+            <button class="btn btn-ghost btn-sm" onclick="App.refreshAll()" title="Обновить метрики" style="height:32px;padding:0 var(--space-3);white-space:nowrap">
+                <svg width="14" height="14" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2.2"><polyline points="23 4 23 10 17 10"/><path d="M20.49 15a9 9 0 1 1-.02-8.49"/></svg>
+                Обновить
+            </button>
+        </div>
+
+        <div id="lastUpdateBadge" style="display:flex;align-items:center;gap:var(--space-1);margin-left:var(--space-3);font-size:var(--text-xs);color:var(--text-muted);white-space:nowrap">
+            <svg width="12" height="12" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2"><circle cx="12" cy="12" r="10"/><polyline points="12 6 12 12 16 14"/></svg>
+            <span id="lastUpdateText">—</span>
+        </div>
+
         <button class="theme-btn" id="themeToggle" title="Переключить тему" aria-label="Переключить тему">
             <svg id="themeIcon" width="20" height="20" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2">
                 <path d="M21 12.79A9 9 0 1 1 11.21 3 7 7 0 0 0 21 12.79z"/>
@@ -871,20 +891,6 @@
                             <option value="flow_control">🟡 Flow Control Active</option>
                         </select>
                     </div>
-                    <div style="display:flex;align-items:center;gap:var(--space-2)">
-                        <span style="font-size:var(--text-xs);font-weight:600;text-transform:uppercase;letter-spacing:.07em;color:var(--text-muted)">Частота</span>
-                        <select class="form-input" id="pollIntervalSelect" style="width:100px" onchange="App.setPollInterval(this.value)">
-                            <option value="2">2 сек</option>
-                            <option value="5" selected>5 сек</option>
-                            <option value="10">10 сек</option>
-                            <option value="30">30 сек</option>
-                            <option value="60">60 сек</option>
-                        </select>
-                    </div>
-                    <button class="btn btn-ghost btn-sm" onclick="App.refreshAll()">
-                        <svg width="15" height="15" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2.2"><polyline points="23 4 23 10 17 10"/><path d="M20.49 15a9 9 0 1 1-.02-8.49"/></svg>
-                        Обновить
-                    </button>
                 </div>
             </div>
 
@@ -1159,13 +1165,7 @@
                     </div>
                     <div class="form-group">
                         <label class="form-label">Частота опроса <span>секунды</span></label>
-                        <select class="form-input" id="pollInterval" onchange="App.setPollInterval(this.value)">
-                            <option value="2">2 сек</option>
-                            <option value="5" selected>5 сек</option>
-                            <option value="10">10 сек</option>
-                            <option value="30">30 сек</option>
-                            <option value="60">60 сек</option>
-                        </select>
+                        <p class="form-hint" style="margin-top:var(--space-1)">Управляется из шапки страницы (выпадающий список «Опрос»)</p>
                     </div>
                 </div>
                 <div class="form-group">
@@ -1585,22 +1585,29 @@
         function renderKpis() {
             var grid = document.getElementById('kpiGrid');
             if (!grid) return;
-            var n0 = clusterData.nodes[0].metrics;
-            var n1 = clusterData.nodes[1].metrics;
+            if (!clusterData.nodes || clusterData.nodes.length === 0) {
+                grid.innerHTML = '<div class="kpi-card" style="grid-column:1/-1;text-align:center;color:var(--text-muted);padding:var(--space-8)">Нет нод в мониторинге</div>';
+                return;
+            }
+            var activeNodes = clusterData.nodes.filter(function(n) { return n && n.metrics; });
+            if (activeNodes.length === 0) { grid.innerHTML = ''; return; }
+            var total = clusterData.nodes.length;
+            var n0 = activeNodes[0].metrics;
+            var n1 = activeNodes.length > 1 ? activeNodes[1].metrics : n0;
             var synced = clusterData.nodes.filter(function(n) { return n.state === 'Synced'; }).length;
             var clSize = parseInt(n0.wsrep_cluster_size) || 0;
             var clStatus = n0.wsrep_cluster_status;
             var fcOk = (parseFloat(n0.wsrep_flow_control_paused) < 0.05 && parseFloat(n1.wsrep_flow_control_paused) < 0.05);
             var certFail = '0';
-            var queue = Math.max(parseInt(n0.wsrep_local_recv_queue)||0, parseInt(n1.wsrep_local_recv_queue)||0);
+            var queue = Math.max.apply(null, activeNodes.map(function(n){ return parseInt(n.metrics.wsrep_local_recv_queue)||0; }));
 
             var statusClass = clStatus === 'Primary' ? 'ok' : 'error';
             var fcClass = fcOk ? 'ok' : 'warn';
 
             grid.innerHTML = [
                 kpiHtml('Cluster Status', clStatus, statusClass, 'wsrep_cluster_status'),
-                kpiHtml('Cluster Size', clSize + '/2', clSize >= 2 ? 'ok' : 'error', 'wsrep_cluster_size'),
-                kpiHtml('Synced Nodes', synced + '/2', synced >= 2 ? 'ok' : (synced > 0 ? 'warn' : 'error'), 'узлов синхронизировано'),
+                kpiHtml('Cluster Size', clSize + '/' + total, clSize >= total ? 'ok' : 'error', 'wsrep_cluster_size'),
+                kpiHtml('Synced Nodes', synced + '/' + total, synced >= total ? 'ok' : (synced > 0 ? 'warn' : 'error'), 'узлов синхронизировано'),
                 kpiHtml('Flow Control', fcOk ? 'Normal' : 'Active', fcClass, 'wsrep_flow_control_paused'),
                 kpiHtml('Recv Queue', queue.toString(), queue === 0 ? 'ok' : 'warn', 'max по нодам'),
                 kpiHtml('Cert Failures', certFail, 'ok', 'wsrep_local_cert_failures'),
@@ -1689,9 +1696,13 @@
 
         // ---- TOPOLOGY ----
         function renderTopology() {
-            // update SVG nodes
+            if (!clusterData.nodes || clusterData.nodes.length === 0) {
+                var tbl = document.getElementById('topoTable');
+                if (tbl) tbl.innerHTML = '<p style="padding:1rem;color:var(--text-muted)">Нет нод</p>';
+                return;
+            }
             var n0 = clusterData.nodes[0];
-            var n1 = clusterData.nodes[1];
+            var n1 = clusterData.nodes.length > 1 ? clusterData.nodes[1] : null;
 
             function svgColor(state) {
                 if (state === 'Synced') return 'var(--success)';
@@ -1911,7 +1922,13 @@
             },
 
             refreshAll: function() {
-                renderAll();
+                _lastUpdateTs = new Date();
+                updateLastUpdateBadge();
+                if (_dataMode === 'real') {
+                    fetchRealData();
+                } else {
+                    renderAll();
+                }
                 addLog('INFO', 'Метрики обновлены вручную.');
                 toast('success', 'Данные обновлены');
             },
@@ -2029,7 +2046,7 @@
                 startAutoRefresh();
                 addLog('INFO', 'Частота опроса изменена: ' + val + ' сек');
                 // синхронизируем оба селекта
-                ['pollIntervalSelect', 'pollInterval'].forEach(function(id) {
+                ['pollIntervalSelect'].forEach(function(id) {
                     var el = document.getElementById(id);
                     if (el) el.value = val;
                 });
@@ -2037,6 +2054,8 @@
 
             setDataMode: function(mode) {
                 _dataMode = mode;
+                clusterData = { nodes: [], timestamp: null };
+                renderAll();
                 var btnMock = document.getElementById('btnMock');
                 var btnReal = document.getElementById('btnReal');
                 var hint    = document.getElementById('dataModeHint');
@@ -2047,14 +2066,65 @@
                         ? 'Сейчас: симуляция — данные генерируются локально в браузере'
                         : 'Сейчас: Real — данные запрашиваются с backend API (localhost:8000)';
                 }
+                if (mode === 'real') {
+                    // Очищаем mock-значения, показываем «Connecting...»
+                    clusterData.nodes.forEach(function(n) {
+                        n.state = 'Joiner';
+                        n.metrics = {
+                            wsrep_cluster_status: '...', wsrep_cluster_size: '—',
+                            wsrep_connected: '—', wsrep_ready: '—',
+                            wsrep_local_state_comment: 'Connecting...',
+                            wsrep_local_recv_queue: '0', wsrep_local_send_queue: '0',
+                            wsrep_flow_control_paused: '0.000',
+                            wsrep_cert_deps_distance: '—',
+                            wsrep_last_committed: '—',
+                            wsrep_replicated_bytes: '—', wsrep_received_bytes: '—'
+                        };
+                    });
+                    renderAll();
+                    fetchRealData();
+                } else {
+                    // Восстанавливаем mock-данные при возврате в Mock
+                    clusterData.nodes.forEach(function(n) {
+                        n.state = 'Synced';
+                        n.metrics.wsrep_cluster_status = 'Primary';
+                        n.metrics.wsrep_cluster_size = String(clusterData.nodes.length);
+                        n.metrics.wsrep_connected = 'ON';
+                        n.metrics.wsrep_ready = 'ON';
+                        n.metrics.wsrep_local_state_comment = 'Synced';
+                        n.metrics.wsrep_flow_control_paused = '0.000';
+                        if (!n.metrics.wsrep_last_committed || n.metrics.wsrep_last_committed === '—') {
+                            n.metrics.wsrep_last_committed = '104521';
+                        }
+                    });
+                    renderAll();
+                }
                 addLog('INFO', 'Режим данных переключён: ' + (mode === 'mock' ? 'Mock (симуляция)' : 'Real (backend API)'));
                 toast(mode === 'real' ? 'info' : 'success', 'Режим: ' + (mode === 'mock' ? 'Mock' : 'Real'));
             },
 
             reloadYaml: function() {
-                renderYamlPreview();
-                addLog('INFO', 'nodes.yaml перечитан (симуляция).');
-                toast('success', 'nodes.yaml перезагружен');
+                var apiBase = (document.getElementById('apiUrl') ? document.getElementById('apiUrl').value.replace(/\/+$/, '') : 'http://localhost:8000');
+                fetch(apiBase + '/api/reload', { method: 'POST' })
+                    .then(function(r) { return r.json(); })
+                    .then(function(data) {
+                        // Если вернулись ноды — обновляем локальный стейт
+                        if (data && data.nodes) {
+                            data.nodes.forEach(function(nd) {
+                                var local = clusterData.nodes.find(function(n) { return n.id === nd.id; });
+                                if (local) { Object.assign(local, nd); }
+                            });
+                        }
+                        renderYamlPreview();
+                        renderAll();
+                        addLog('INFO', 'nodes.yaml перечитан с сервера.');
+                        toast('success', 'nodes.yaml перезагружен');
+                    })
+                    .catch(function(e) {
+                        renderYamlPreview();
+                        addLog('INFO', '[local] nodes.yaml перечитан (Mock: backend недоступен).');
+                        toast('success', 'nodes.yaml перезагружен (только UI)');
+                    });
             },
 
             saveDbConfig: function() {
@@ -2082,7 +2152,7 @@
                 if (!name || !host) { toast('error', 'Заполните Имя и IP-адрес'); return; }
                 var exists = clusterData.nodes.find(function(n) { return n.id === name || n.name === name; });
                 if (exists) { toast('error', 'Нода с таким именем уже существует'); return; }
-                clusterData.nodes.push({
+                var newNode = {
                     id: name, name: name, host: host, port: port, ssh: ssh, role: 'node', state: 'Offline',
                     metrics: {
                         wsrep_cluster_status: 'Disconnected', wsrep_cluster_size: '0',
@@ -2092,12 +2162,34 @@
                         wsrep_flow_control_paused: '0.000', wsrep_cert_deps_distance: '0.00',
                         wsrep_last_committed: '0', wsrep_replicated_bytes: '0', wsrep_received_bytes: '0'
                     }
-                });
-                App.closeModal('addNodeModal');
-                renderAll();
-                addLog('INFO', 'Нода добавлена: ' + name + ' (' + host + ')');
-                toast('success', 'Нода ' + name + ' добавлена');
+                };
+                var apiBase = (document.getElementById('apiUrl') ? document.getElementById('apiUrl').value.replace(/\/+$/, '') : 'http://localhost:8000');
+                fetch(apiBase + '/api/config/node', {
+                    method: 'POST',
+                    headers: { 'Content-Type': 'application/json' },
+                    body: JSON.stringify({ id: name, name: name, host: host, port: port, ssh_port: ssh })
+                })
+                    .then(function(r) {
+                        if (!r.ok) return r.json().then(function(e) { throw new Error(e.detail || r.status); });
+                        return r.json();
+                    })
+                    .then(function() {
+                        clusterData.nodes.push(newNode);
+                        App.closeModal('addNodeModal');
+                        renderAll();
+                        addLog('INFO', 'Нода добавлена в nodes.yaml: ' + name + ' (' + host + ')');
+                        toast('success', 'Нода ' + name + ' добавлена');
+                    })
+                    .catch(function(e) {
+                        // Fallback: только локально (Mock-режим)
+                        clusterData.nodes.push(newNode);
+                        App.closeModal('addNodeModal');
+                        renderAll();
+                        addLog('INFO', '[local] Нода добавлена локально: ' + name + ' (backend: ' + e.message + ')');
+                        toast('success', 'Нода ' + name + ' добавлена (только в UI)');
+                    });
             },
+
 
             editNode: function(nodeId) {
                 toast('info', 'Редактирование: откройте nodes.yaml для ручного изменения');
@@ -2107,10 +2199,25 @@
                 confirm('🗑️', 'Удалить ноду ' + nodeId + '?',
                     'Нода будет удалена из мониторинга. Galera кластер не затрагивается.', 'btn-danger').then(function(ok) {
                     if (!ok) return;
-                    clusterData.nodes = clusterData.nodes.filter(function(n) { return n.id !== nodeId; });
-                    renderAll();
-                    addLog('WARN', 'Нода удалена из конфига: ' + nodeId);
-                    toast('warning', 'Нода ' + nodeId + ' удалена');
+                    var apiBase = (document.getElementById('apiUrl') ? document.getElementById('apiUrl').value.replace(/\/+$/, '') : 'http://localhost:8000');
+                    fetch(apiBase + '/api/config/node/' + encodeURIComponent(nodeId), { method: 'DELETE' })
+                        .then(function(r) {
+                            if (!r.ok) return r.json().then(function(e) { throw new Error(e.detail || r.status); });
+                            return r.json();
+                        })
+                        .then(function() {
+                            clusterData.nodes = clusterData.nodes.filter(function(n) { return n.id !== nodeId; });
+                            renderAll();
+                            addLog('WARN', 'Нода удалена из nodes.yaml: ' + nodeId);
+                            toast('warning', 'Нода ' + nodeId + ' удалена');
+                        })
+                        .catch(function(e) {
+                            // Если backend недоступен (Mock-режим) — удаляем только локально
+                            clusterData.nodes = clusterData.nodes.filter(function(n) { return n.id !== nodeId; });
+                            renderAll();
+                            addLog('WARN', '[local] Нода удалена локально: ' + nodeId + ' (backend: ' + e.message + ')');
+                            toast('warning', 'Нода ' + nodeId + ' удалена (только в UI)');
+                        });
                 });
             },
 
@@ -2126,22 +2233,58 @@
                 var cluster = document.getElementById('arbCluster').value.trim();
                 var gcomm   = document.getElementById('arbGcomm').value.trim();
                 if (!host) { toast('error', 'Укажите IP арбитра'); return; }
-                clusterData.arbitrator = { host: host, ssh: ssh, cluster: cluster, gcomm: gcomm };
-                App.closeModal('addArbitratorModal');
-                renderAll();
-                addLog('INFO', 'Арбитр добавлен: ' + host);
-                toast('success', 'Арбитр garbd добавлен');
+                var arbData = { host: host, ssh_port: ssh, cluster: cluster, gcomm: gcomm };
+                var apiBase = (document.getElementById('apiUrl') ? document.getElementById('apiUrl').value.replace(/\/+$/, '') : 'http://localhost:8000');
+                fetch(apiBase + '/api/config/arbitrator', {
+                    method: 'POST',
+                    headers: { 'Content-Type': 'application/json' },
+                    body: JSON.stringify(arbData)
+                })
+                    .then(function(r) {
+                        if (!r.ok) return r.json().then(function(e) { throw new Error(e.detail || r.status); });
+                        return r.json();
+                    })
+                    .then(function() {
+                        clusterData.arbitrator = { host: host, ssh: ssh, cluster: cluster, gcomm: gcomm };
+                        App.closeModal('addArbitratorModal');
+                        renderAll();
+                        addLog('INFO', 'Арбитр добавлен в nodes.yaml: ' + host);
+                        toast('success', 'Арбитр garbd добавлен');
+                    })
+                    .catch(function(e) {
+                        clusterData.arbitrator = { host: host, ssh: ssh, cluster: cluster, gcomm: gcomm };
+                        App.closeModal('addArbitratorModal');
+                        renderAll();
+                        addLog('INFO', '[local] Арбитр добавлен локально: ' + host + ' (backend: ' + e.message + ')');
+                        toast('success', 'Арбитр добавлен (только в UI)');
+                    });
             },
+
 
             removeArbitrator: function() {
                 confirm('🗑️', 'Удалить арбитр?', 'garbd будет удалён из конфигурации.', 'btn-danger').then(function(ok) {
                     if (!ok) return;
-                    clusterData.arbitrator = null;
-                    renderAll();
-                    addLog('WARN', 'Арбитр удалён из конфига.');
-                    toast('warning', 'Арбитр удалён');
+                    var apiBase = (document.getElementById('apiUrl') ? document.getElementById('apiUrl').value.replace(/\/+$/, '') : 'http://localhost:8000');
+                    fetch(apiBase + '/api/config/arbitrator', { method: 'DELETE' })
+                        .then(function(r) {
+                            if (!r.ok) return r.json().then(function(e) { throw new Error(e.detail || r.status); });
+                            return r.json();
+                        })
+                        .then(function() {
+                            clusterData.arbitrator = null;
+                            renderAll();
+                            addLog('WARN', 'Арбитр удалён из nodes.yaml.');
+                            toast('warning', 'Арбитр удалён');
+                        })
+                        .catch(function(e) {
+                            clusterData.arbitrator = null;
+                            renderAll();
+                            addLog('WARN', '[local] Арбитр удалён локально (backend: ' + e.message + ')');
+                            toast('warning', 'Арбитр удалён (только в UI)');
+                        });
                 });
             },
+
 
             resolveConfirm: function() {
                 document.getElementById('confirmOverlay').classList.remove('open');
@@ -2165,6 +2308,13 @@
         var _pollIntervalMs = 5000;
         var _pollTimer = null;
         var _dataMode = 'mock'; // 'mock' | 'real'
+        var _lastUpdateTs = new Date();
+
+        function updateLastUpdateBadge() {
+            var el = document.getElementById('lastUpdateText');
+            if (!el) return;
+            el.textContent = 'Обновлено: ' + _lastUpdateTs.toTimeString().slice(0,8);
+        }
 
         function startAutoRefresh() {
             if (_pollTimer) clearInterval(_pollTimer);
@@ -2175,8 +2325,14 @@
                         if (n.state === 'Synced') {
                             var base = parseInt(n.metrics.wsrep_last_committed) + Math.floor(Math.random()*4);
                             n.metrics.wsrep_last_committed = base.toString();
+                            n.metrics.wsrep_local_recv_queue = Math.random() < 0.1 ? String(Math.floor(Math.random()*3)) : '0';
                         }
                     });
+                    var syncedCount = clusterData.nodes.filter(function(n){ return n.state === 'Synced'; }).length;
+                    var lc = clusterData.nodes.length > 0 ? clusterData.nodes[0].metrics.wsrep_last_committed : '—';
+                    addLog('INFO', '[mock] Tick: ' + syncedCount + '/' + clusterData.nodes.length + ' Synced · last_committed=' + lc);
+                    _lastUpdateTs = new Date();
+                    updateLastUpdateBadge();
                     renderAll();
                 } else {
                     // Real mode — вызываем backend API
@@ -2198,6 +2354,9 @@
                                 if (nd.state) local.state = nd.state;
                             }
                         });
+                        _lastUpdateTs = new Date();
+                        updateLastUpdateBadge();
+                        addLog('INFO', '[real] Данные получены с backend API');
                         renderAll();
                     }
                 })

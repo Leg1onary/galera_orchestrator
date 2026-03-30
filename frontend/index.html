@@ -1163,22 +1163,9 @@
                     Подключение к БД
                 </div>
 
-                <!-- Mock / Real toggle -->
+                <!-- Режим данных — управление через кнопки MOCK|REAL в шапке -->
                 <div class="form-group">
-                    <label class="form-label">Режим данных</label>
-                    <div style="display:flex;gap:var(--space-2);margin-top:var(--space-1)">
-                        <button id="btnMock" class="btn btn-primary" onclick="App.setDataMode('mock')"
-                                style="flex:1;justify-content:center">
-                            <svg width="15" height="15" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2"><path d="M12 20h9"/><path d="M16.5 3.5l4 4-13 13H3v-4.5L16.5 3.5z"/></svg>
-                            Mock (симуляция)
-                        </button>
-                        <button id="btnReal" class="btn btn-ghost" onclick="App.setDataMode('real')"
-                                style="flex:1;justify-content:center">
-                            <svg width="15" height="15" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2"><ellipse cx="12" cy="5" rx="9" ry="3"/><path d="M3 5v14c0 1.66 4.03 3 9 3s9-1.34 9-3V5"/><path d="M3 12c0 1.66 4.03 3 9 3s9-1.34 9-3"/></svg>
-                            Real (backend API)
-                        </button>
-                    </div>
-                    <p class="form-hint" id="dataModeHint">Сейчас: симуляция — данные генерируются локально в браузере</p>
+                    <p class="form-hint" id="dataModeHint">Активен Mock-режим. Переключатель MOCK | REAL находится в шапке приложения.</p>
                 </div>
 
                 <hr class="divider">
@@ -1474,6 +1461,29 @@
     (function() {
         'use strict';
 
+        // ======================================================
+        // STATE VARIABLES — объявляем все переменные состояния в начале IIFE
+        // (избегаем hoisting-проблем: var undefined до первого присваивания)
+        // ======================================================
+        var _pollIntervalMs = 5000;
+        var _pollTimer      = null;
+        var _dataMode       = 'mock'; // значение перезапишется из localStorage при restoreStateFromLS
+        var _env            = 'test'; // 'test' | 'prod'
+        var _tickCount      = 0;
+        var _lastUpdateStr  = '—';
+
+        // localStorage key constants
+        var LS_MODE = 'galera_data_mode';
+        var LS_ENV  = 'galera_env';
+
+        // localStorage helpers (inline здесь, чтобы были доступны сразу)
+        function lsGet(key, def) {
+            try { var v = localStorage.getItem(key); return v !== null ? v : def; } catch(e) { return def; }
+        }
+        function lsSet(key, val) {
+            try { localStorage.setItem(key, val); } catch(e) {}
+        }
+
         // ---- THEME ----
         var themeEl = document.documentElement;
         var themeIcon = document.getElementById('themeIcon');
@@ -1693,17 +1703,20 @@
         function nodeCardHtml(node) {
             var sc = stateClass(node.state);
             var bc = badgeClass(node.state);
-            var isOffline = node.state === 'Offline';
+            var isOffline = node.state === 'Offline' || !node.online;
+
+            // Guard: нода может прийти без метрик (offline в Real-режиме)
+            var m = node.metrics || {};
 
             var metricsHtml = [
-                ['wsrep_cluster_status', node.metrics.wsrep_cluster_status],
-                ['wsrep_cluster_size',   node.metrics.wsrep_cluster_size],
-                ['wsrep_connected',      node.metrics.wsrep_connected],
-                ['wsrep_ready',          node.metrics.wsrep_ready],
-                ['wsrep_local_state',    node.metrics.wsrep_local_state_comment],
-                ['recv_queue',           node.metrics.wsrep_local_recv_queue],
-                ['send_queue',           node.metrics.wsrep_local_send_queue],
-                ['flow_control',         node.metrics.wsrep_flow_control_paused],
+                ['wsrep_cluster_status', m.wsrep_cluster_status   || '—'],
+                ['wsrep_cluster_size',   m.wsrep_cluster_size     || '—'],
+                ['wsrep_connected',      m.wsrep_connected        || '—'],
+                ['wsrep_ready',          m.wsrep_ready            || '—'],
+                ['wsrep_local_state',    m.wsrep_local_state_comment || (isOffline ? 'Offline' : '—')],
+                ['recv_queue',           m.wsrep_local_recv_queue || '—'],
+                ['send_queue',           m.wsrep_local_send_queue || '—'],
+                ['flow_control',         m.wsrep_flow_control_paused || '—'],
             ].map(function(p) {
                 var mc = metricClass(p[0], p[1]);
                 return '<div class="metric-row"><div class="metric-key">' + p[0] + '</div>' +
@@ -2510,24 +2523,6 @@
                 if (confirmCallback) { confirmCallback(false); confirmCallback = null; }
             }
         };
-
-        // ---- AUTO-REFRESH STATE VARS ---- (declare BEFORE init so everything can use them)
-        var _pollIntervalMs = 5000;
-        var _pollTimer = null;
-        var _dataMode = 'mock'; // значение перезапишется restoreStateFromLS
-        var _env = 'test';      // 'test' | 'prod'
-        var _tickCount = 0;
-        var _lastUpdateStr = '—';
-
-        // ---- LOCALSTORAGE HELPERS ----
-        var LS_MODE = 'galera_data_mode';
-        var LS_ENV  = 'galera_env';
-        function lsGet(key, def) {
-            try { var v = localStorage.getItem(key); return v !== null ? v : def; } catch(e) { return def; }
-        }
-        function lsSet(key, val) {
-            try { localStorage.setItem(key, val); } catch(e) {}
-        }
 
         // ---- INIT: restore state from localStorage IMMEDIATELY (no flicker) ----
         (function restoreStateFromLS() {

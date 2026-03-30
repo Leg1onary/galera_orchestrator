@@ -29,14 +29,14 @@ mock_nodes:
   ssh_key: ~/.ssh/id_rsa
   enabled: true
 arbitrator:
-  host: 10.0.0.13
+  enabled: false
+  host: ''
   ssh_port: 22
   ssh_user: root
   ssh_key: ~/.ssh/id_rsa
-  enabled: true
 db:
   user: monitor
   password: monitor_pass
 settings:
-  poll_interval: 5
+  poll_interval: 10
   use_mock: true

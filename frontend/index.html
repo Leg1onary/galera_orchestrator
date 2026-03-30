@@ -1198,7 +1198,7 @@
                 </div>
                 <div class="form-group">
                     <label class="form-label">Backend API URL <span>только для Real-режима</span></label>
-                    <input class="form-input" type="text" value="http://localhost:8000" id="apiUrl" placeholder="http://localhost:8000">
+                    <input class="form-input" type="text" value="" id="apiUrl" placeholder="http://your-server:8000 (пусто = автоопределение)">
                 </div>
                 <button class="btn btn-primary" onclick="App.saveDbConfig()">Сохранить конфиг</button>
             </div>
@@ -1482,6 +1482,14 @@
         }
         function lsSet(key, val) {
             try { localStorage.setItem(key, val); } catch(e) {}
+        }
+
+        // API base URL helper — использует поле из Настроек, или автоопределяет из window.location
+        // Так приложение работает и с http://192.168.x.x:8000 без изменения кода
+        function getApiBase() {
+            var el = document.getElementById('apiUrl');
+            var custom = el ? el.value.trim().replace(/\/+$/, '') : '';
+            return custom || (window.location.protocol + '//' + window.location.host);
         }
 
         // ---- THEME ----
@@ -2035,7 +2043,7 @@
             toast(mode === 'real' ? 'info' : 'success', 'Режим: ' + (mode === 'mock' ? 'Mock' : 'Real'));
 
             // Синх в nodes.yaml (побочно, secondary)
-            var apiBase = (document.getElementById('apiUrl') ? document.getElementById('apiUrl').value.replace(/\/+$/, '') : 'http://localhost:8000');
+            var apiBase = getApiBase();
             fetch(apiBase + '/api/config/mode', {
                 method: 'POST', headers: { 'Content-Type': 'application/json' },
                 body: JSON.stringify({ use_mock: mode === 'mock' })
@@ -2090,7 +2098,7 @@
                     renderAll();
                     toast('info', 'Сценарий применён: ' + key);
                     // Синхронизируем backend mock
-                    var apiBase = (document.getElementById('apiUrl') ? document.getElementById('apiUrl').value.replace(/\/+$/, '') : 'http://localhost:8000');
+                    var apiBase = getApiBase();
                     fetch(apiBase + '/api/scenario/' + key, { method: 'POST' }).catch(function(){});
                 }
             },
@@ -2140,7 +2148,7 @@
                     if (!ok) return;
                     if (_dataMode === 'real') {
                         // Real mode — SSH через backend API
-                        var apiBase = (document.getElementById('apiUrl') ? document.getElementById('apiUrl').value.replace(/\/+$/, '') : 'http://localhost:8000');
+                        var apiBase = getApiBase();
                         node.state = (action === 'stop') ? 'Offline' : 'Joiner';
                         renderAll();
                         fetch(apiBase + '/api/node/' + nodeId + '/action', {
@@ -2214,7 +2222,7 @@
                     addLog('WARN', 'Bootstrap запущен на ' + chosen + ' — galera_new_cluster');
                     toast('warning', 'Bootstrap запущен на ' + chosen);
                     if (_dataMode === 'real') {
-                        var apiBase = (document.getElementById('apiUrl') ? document.getElementById('apiUrl').value.replace(/\/+$/, '') : 'http://localhost:8000');
+                        var apiBase = getApiBase();
                         fetch(apiBase + '/api/bootstrap', {
                             method: 'POST',
                             headers: { 'Content-Type': 'application/json' },
@@ -2245,7 +2253,7 @@
                     addLog('INFO', nodeId + ': Rejoin (' + method + ')');
                     toast('info', nodeId + ': Rejoin запущен...');
                     if (_dataMode === 'real') {
-                        var apiBase = (document.getElementById('apiUrl') ? document.getElementById('apiUrl').value.replace(/\/+$/, '') : 'http://localhost:8000');
+                        var apiBase = getApiBase();
                         fetch(apiBase + '/api/rejoin', {
                             method: 'POST',
                             headers: { 'Content-Type': 'application/json' },
@@ -2313,7 +2321,7 @@
             pingNode: function(nodeId) {
                 var badge = document.getElementById('ping-' + nodeId);
                 if (badge) { badge.className = 'node-ping-badge ping-wait'; badge.textContent = '⏳ ping...'; }
-                var apiBase = (document.getElementById('apiUrl') ? document.getElementById('apiUrl').value.replace(/\/+$/, '') : 'http://localhost:8000');
+                var apiBase = getApiBase();
                 fetch(apiBase + '/api/node/' + nodeId + '/ping')
                     .then(function(r) { return r.json(); })
                     .then(function(res) {
@@ -2333,7 +2341,7 @@
             },
 
             reloadYaml: function() {
-                var apiBase = (document.getElementById('apiUrl') ? document.getElementById('apiUrl').value.replace(/\/+$/, '') : 'http://localhost:8000');
+                var apiBase = getApiBase();
                 fetch(apiBase + '/api/reload', { method: 'POST' })
                     .then(function(r) { return r.json(); })
                     .then(function() {
@@ -2352,7 +2360,7 @@
             saveDbConfig: function() {
                 var dbUser = document.getElementById('dbUser')     ? document.getElementById('dbUser').value.trim()     : '';
                 var dbPass = document.getElementById('dbPassword') ? document.getElementById('dbPassword').value        : '';
-                var apiBase = (document.getElementById('apiUrl') ? document.getElementById('apiUrl').value.replace(/\/+$/, '') : 'http://localhost:8000');
+                var apiBase = getApiBase();
                 fetch(apiBase + '/api/prefs', {
                     method: 'POST',
                     headers: { 'Content-Type': 'application/json' },
@@ -2404,7 +2412,7 @@
                         wsrep_cluster_state_uuid: '—', wsrep_replicated_bytes: '—', wsrep_received_bytes: '—'
                     }
                 };
-                var apiBase = (document.getElementById('apiUrl') ? document.getElementById('apiUrl').value.replace(/\/+$/, '') : 'http://localhost:8000');
+                var apiBase = getApiBase();
                 fetch(apiBase + '/api/config/node', {
                     method: 'POST',
                     headers: { 'Content-Type': 'application/json' },
@@ -2436,7 +2444,7 @@
                 confirm('🗑️', 'Удалить ноду ' + nodeId + '?',
                     'Нода будет удалена из мониторинга и nodes.yaml. Galera кластер не затрагивается.', 'btn-danger').then(function(ok) {
                     if (!ok) return;
-                    var apiBase = (document.getElementById('apiUrl') ? document.getElementById('apiUrl').value.replace(/\/+$/, '') : 'http://localhost:8000');
+                    var apiBase = getApiBase();
                     fetch(apiBase + '/api/config/node/' + nodeId, { method: 'DELETE' })
                         .then(function(r) { return r.json(); })
                         .then(function() {
@@ -2469,7 +2477,7 @@
                 var cluster = document.getElementById('arbCluster') ? document.getElementById('arbCluster').value.trim() : '';
                 var gcomm   = document.getElementById('arbGcomm')   ? document.getElementById('arbGcomm').value.trim()   : '';
                 if (!host) { toast('error', 'Укажите IP арбитра'); return; }
-                var apiBase = (document.getElementById('apiUrl') ? document.getElementById('apiUrl').value.replace(/\/+$/, '') : 'http://localhost:8000');
+                var apiBase = getApiBase();
                 fetch(apiBase + '/api/config/arbitrator', {
                     method: 'POST',
                     headers: { 'Content-Type': 'application/json' },
@@ -2495,7 +2503,7 @@
             removeArbitrator: function() {
                 confirm('🗑️', 'Удалить арбитр?', 'garbd будет удалён из nodes.yaml.', 'btn-danger').then(function(ok) {
                     if (!ok) return;
-                    var apiBase = (document.getElementById('apiUrl') ? document.getElementById('apiUrl').value.replace(/\/+$/, '') : 'http://localhost:8000');
+                    var apiBase = getApiBase();
                     fetch(apiBase + '/api/config/arbitrator', { method: 'DELETE' })
                         .then(function(r) { return r.json(); })
                         .then(function() {
@@ -2593,7 +2601,7 @@
         }
 
         function fetchRealData() {
-            var apiBase = (document.getElementById('apiUrl') ? document.getElementById('apiUrl').value.replace(/\/+$/, '') : 'http://localhost:8000');
+            var apiBase = getApiBase();
             fetch(apiBase + '/api/status')
                 .then(function(r) { if (!r.ok) throw new Error('HTTP ' + r.status); return r.json(); })
                 .then(function(data) {
@@ -2622,7 +2630,8 @@
                                 wsrep_local_send_queue:     String(nd.wsrep_local_send_queue  || '0'),
                                 wsrep_flow_control_paused:  String(nd.wsrep_flow_control_paused || '0.000'),
                                 wsrep_cert_deps_distance:   String(nd.wsrep_cert_deps_distance || '0.00'),
-                                wsrep_last_committed:       String(nd.wsrep_local_commits      || '0'),
+                                // wsrep_last_committed — seqno последней транзакции (нужен для Bootstrap)
+                                wsrep_last_committed:       String(nd.wsrep_last_committed      || nd.wsrep_local_commits || '0'),
                                 wsrep_local_cert_failures:  String(nd.wsrep_local_cert_failures|| '0'),
                                 wsrep_bf_aborts:            String(nd.wsrep_bf_aborts          || '0'),
                                 wsrep_cluster_conf_id:      String(nd.wsrep_cluster_conf_id    || '0'),
@@ -2653,7 +2662,7 @@
 
         // При загрузке — спросить backend какой режим сохранён + восстановить префы
         (function initFromBackend() {
-            var apiBase = (document.getElementById('apiUrl') ? document.getElementById('apiUrl').value.replace(/\/+$/, '') : 'http://localhost:8000');
+            var apiBase = getApiBase();
 
             // P2: восстановить префы (pollInterval, тема) из /api/prefs
             fetch(apiBase + '/api/prefs')
@@ -2673,21 +2682,21 @@
                 })
                 .catch(function() {});
 
-            // Восстановить режим данных (F5) — без предупреждений, просто применяем
-            fetch(apiBase + '/api/config/mode')
-                .then(function(r) { return r.json(); })
-                .then(function(data) {
-                    var savedMode = data.mode || 'mock';
-                    if (savedMode !== _dataMode) {
-                        if (savedMode === 'real') {
-                            addLog('INFO', 'Режим восстановлен: Real (из nodes.yaml)');
-                        }
+            // Восстановить режим данных из nodes.yaml — ТОЛЬКО если localStorage пуст (первый запуск)
+            // При повторных F5 localStorage является source of truth — nodes.yaml не перезаписывает
+            var lsHasMode = (function() {
+                try { return localStorage.getItem(LS_MODE) !== null; } catch(e) { return false; }
+            })();
+            if (!lsHasMode) {
+                fetch(apiBase + '/api/config/mode')
+                    .then(function(r) { return r.json(); })
+                    .then(function(data) {
+                        var savedMode = data.mode || 'mock';
+                        addLog('INFO', 'Первый запуск: режим импортирован из nodes.yaml: ' + savedMode.toUpperCase());
                         applyMode(savedMode);
-                    }
-                })
-                .catch(function() {
-                    // backend недоступен — остаёмся в mock
-                });
+                    })
+                    .catch(function() {});
+            }
         })();
 
     })();

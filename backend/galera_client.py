@@ -132,6 +132,8 @@ def _real_node_status(node: dict, cfg: dict) -> dict:
             "wsrep_local_recv_queue":       _int("wsrep_local_recv_queue"),
             "wsrep_flow_control_paused":    str(round(_float("wsrep_flow_control_paused"), 4)),
             "wsrep_local_commits":          _int("wsrep_local_commits"),
+            # wsrep_last_committed — последний применённый seqno, нужен для bootstrap-анализа
+            "wsrep_last_committed":         _int("wsrep_last_committed"),
             "wsrep_local_cert_failures":    _int("wsrep_local_cert_failures"),
             "wsrep_bf_aborts":              _int("wsrep_bf_aborts"),
             "wsrep_cert_deps_distance":     round(_float("wsrep_cert_deps_distance"), 2),

@@ -73,7 +73,7 @@ async def api_status():
     global _prev_status
     try:
         cfg  = load_config()
-        data = await asyncio.get_event_loop().run_in_executor(
+        data = await asyncio.get_running_loop().run_in_executor(
             None, get_cluster_status, cfg
         )
         _detect_changes(data)

@@ -1473,49 +1473,45 @@
         themeBtn.addEventListener('click', function() { setTheme(!isDark); });
 
         // ---- DATA MODEL ----
-        var clusterData = {
+        // Эталон mock-данных — восстанавливается при переключении real→mock
+        var MOCK_DEFAULT = {
             nodes: [
                 {
                     id: 'gc01', name: 'gc01', host: '10.0.0.11', port: 3306, ssh: 22,
-                    role: 'node',
-                    state: 'Synced',
+                    role: 'node', state: 'Synced',
                     metrics: {
-                        wsrep_cluster_status: 'Primary',
-                        wsrep_cluster_size: '2',
-                        wsrep_connected: 'ON',
-                        wsrep_ready: 'ON',
+                        wsrep_cluster_status: 'Primary', wsrep_cluster_size: '2',
+                        wsrep_connected: 'ON', wsrep_ready: 'ON',
                         wsrep_local_state_comment: 'Synced',
-                        wsrep_local_recv_queue: '0',
-                        wsrep_local_send_queue: '0',
-                        wsrep_flow_control_paused: '0.000',
-                        wsrep_cert_deps_distance: '1.50',
+                        wsrep_local_recv_queue: '0', wsrep_local_send_queue: '0',
+                        wsrep_flow_control_paused: '0.000', wsrep_cert_deps_distance: '1.50',
                         wsrep_last_committed: '104521',
-                        wsrep_replicated_bytes: '2.1 MB',
-                        wsrep_received_bytes: '2.0 MB'
+                        wsrep_replicated_bytes: '2.1 MB', wsrep_received_bytes: '2.0 MB'
                     }
                 },
                 {
                     id: 'gc02', name: 'gc02', host: '10.0.0.12', port: 3306, ssh: 22,
-                    role: 'node',
-                    state: 'Synced',
+                    role: 'node', state: 'Synced',
                     metrics: {
-                        wsrep_cluster_status: 'Primary',
-                        wsrep_cluster_size: '2',
-                        wsrep_connected: 'ON',
-                        wsrep_ready: 'ON',
+                        wsrep_cluster_status: 'Primary', wsrep_cluster_size: '2',
+                        wsrep_connected: 'ON', wsrep_ready: 'ON',
                         wsrep_local_state_comment: 'Synced',
-                        wsrep_local_recv_queue: '0',
-                        wsrep_local_send_queue: '0',
-                        wsrep_flow_control_paused: '0.000',
-                        wsrep_cert_deps_distance: '1.48',
+                        wsrep_local_recv_queue: '0', wsrep_local_send_queue: '0',
+                        wsrep_flow_control_paused: '0.000', wsrep_cert_deps_distance: '1.48',
                         wsrep_last_committed: '104521',
-                        wsrep_replicated_bytes: '2.0 MB',
-                        wsrep_received_bytes: '2.1 MB'
+                        wsrep_replicated_bytes: '2.0 MB', wsrep_received_bytes: '2.1 MB'
                     }
                 }
             ],
             arbitrator: null
         };
+
+        function makeMockData() {
+            // Глубокое копирование — чтобы восстановленные mock-данные не редактировали эталон
+            return JSON.parse(JSON.stringify(MOCK_DEFAULT));
+        }
+
+        var clusterData = makeMockData();
 
         var logLines = [];
         var logFilter = 'all';
@@ -1934,6 +1930,56 @@
             });
         }
 
+        // ---- MODE SWITCH (internal) ----
+        function applyMode(mode) {
+            _dataMode = mode;
+
+            if (mode === 'mock') {
+                // Полностью восстанавливаем эталонные mock-данные — следов real не остаётся
+                clusterData = makeMockData();
+            } else {
+                // Чистим mock-данные перед первым реальным запросом
+                clusterData = { nodes: [], timestamp: null };
+            }
+
+            _lastUpdateStr = '—';
+            var lu0 = document.getElementById('lastUpdateTime');
+            if (lu0) lu0.textContent = '—';
+
+            // Обновляем кнопки в header
+            var btnMock = document.getElementById('btnMock');
+            var btnReal = document.getElementById('btnReal');
+            var hint    = document.getElementById('dataModeHint');
+            if (btnMock) btnMock.className = mode === 'mock' ? 'btn btn-primary' : 'btn btn-ghost';
+            if (btnReal) btnReal.className = mode === 'real' ? 'btn btn-primary' : 'btn btn-ghost';
+            if (hint) {
+                hint.textContent = mode === 'mock'
+                    ? 'Сейчас: симуляция — данные генерируются локально в браузере'
+                    : 'Сейчас: Real — данные запрашиваются с backend API';
+            }
+
+            addLog('INFO', 'Режим данных переключён: ' + (mode === 'mock' ? 'Mock (симуляция)' : 'Real (backend API)'));
+            toast(mode === 'real' ? 'info' : 'success', 'Режим: ' + (mode === 'mock' ? 'Mock' : 'Real'));
+
+            // Персистим в nodes.yaml через backend
+            var apiBase = (document.getElementById('apiUrl') ? document.getElementById('apiUrl').value.replace(/\/+$/, '') : 'http://localhost:8000');
+            fetch(apiBase + '/api/config/mode', {
+                method: 'POST',
+                headers: { 'Content-Type': 'application/json' },
+                body: JSON.stringify({ use_mock: mode === 'mock' })
+            }).catch(function(){});
+
+            // Перезапускаем таймер поллинга
+            startAutoRefresh();
+
+            // Немедленно загружаем данные
+            if (mode === 'real') {
+                fetchRealData();
+            } else {
+                renderAll();
+            }
+        }
+
         // ---- RENDER ALL ----
         function renderAll() {
             updateHeaderStatus();
@@ -2162,39 +2208,22 @@
             },
 
             setDataMode: function(mode) {
-                _dataMode = mode;
-                // Очищаем данные — mock-ноды НЕ должны торчать в Real режиме
-                clusterData = { nodes: [], timestamp: null };
-                _lastUpdateStr = '—';
-                var lu0 = document.getElementById('lastUpdateTime');
-                if (lu0) lu0.textContent = '—';
-                var btnMock = document.getElementById('btnMock');
-                var btnReal = document.getElementById('btnReal');
-                var hint    = document.getElementById('dataModeHint');
-                if (btnMock) btnMock.className = mode === 'mock' ? 'btn btn-primary' : 'btn btn-ghost';
-                if (btnReal) btnReal.className = mode === 'real' ? 'btn btn-primary' : 'btn btn-ghost';
-                if (hint) {
-                    hint.textContent = mode === 'mock'
-                        ? 'Сейчас: симуляция — данные генерируются локально в браузере'
-                        : 'Сейчас: Real — данные запрашиваются с backend API (localhost:8000)';
+                if (mode === _dataMode) return; // уже в этом режиме
+
+                // real → mock: предупреждение — боевые данные будут стерты
+                if (mode === 'mock' && _dataMode === 'real') {
+                    confirm('⚠️', 'Переключиться в Mock-режим?',
+                        'Все данные реального мониторинга будут стёрты. Вместо них загрузятся тестовые данные симуляции.',
+                        'btn-warning'
+                    ).then(function(ok) {
+                        if (!ok) return;
+                        applyMode('mock');
+                    });
+                    return;
                 }
-                addLog('INFO', 'Режим данных переключён: ' + (mode === 'mock' ? 'Mock (симуляция)' : 'Real (backend API)'));
-                toast(mode === 'real' ? 'info' : 'success', 'Режим: ' + (mode === 'mock' ? 'Mock' : 'Real'));
-                // Сохраняем режим в nodes.yaml через backend
-                var apiBase = (document.getElementById('apiUrl') ? document.getElementById('apiUrl').value.replace(/\/+$/, '') : 'http://localhost:8000');
-                fetch(apiBase + '/api/config/mode', {
-                    method: 'POST',
-                    headers: { 'Content-Type': 'application/json' },
-                    body: JSON.stringify({ use_mock: mode === 'mock' })
-                }).catch(function(){});
-                // P1 fix: перезапускаем автополлинг со сброшенным таймером
-                startAutoRefresh();
-                // Немедленно загружаем данные нужного режима
-                if (mode === 'real') {
-                    fetchRealData();
-                } else {
-                    renderAll();
-                }
+
+                // mock → real: предупреждений нет, просто переключаем
+                applyMode(mode);
             },
 
             reloadYaml: function() {
@@ -2510,31 +2539,16 @@
                 })
                 .catch(function() {});
 
-            // Восстановить режим данных
+            // Восстановить режим данных (F5) — без предупреждений, просто применяем
             fetch(apiBase + '/api/config/mode')
                 .then(function(r) { return r.json(); })
                 .then(function(data) {
-                    var savedMode = data.mode || 'mock'; // 'mock' | 'real'
+                    var savedMode = data.mode || 'mock';
                     if (savedMode !== _dataMode) {
-                        _dataMode = savedMode;
-                        // Обновляем кнопки и подсказку без вызова setDataMode (чтобы не писать обратно)
-                        var btnMock = document.getElementById('btnMock');
-                        var btnReal = document.getElementById('btnReal');
-                        var hint    = document.getElementById('dataModeHint');
-                        if (btnMock) btnMock.className = savedMode === 'mock' ? 'btn btn-primary' : 'btn btn-ghost';
-                        if (btnReal) btnReal.className = savedMode === 'real' ? 'btn btn-primary' : 'btn btn-ghost';
-                        if (hint) {
-                            hint.textContent = savedMode === 'mock'
-                                ? 'Сейчас: симуляция — данные генерируются локально в браузере'
-                                : 'Сейчас: Real — данные запрашиваются с backend API (localhost:8000)';
-                        }
                         if (savedMode === 'real') {
-                            // Очищаем mock-данные и загружаем реальные
-                            clusterData = { nodes: [], timestamp: null };
                             addLog('INFO', 'Режим восстановлен: Real (из nodes.yaml)');
-                            fetchRealData();
-                            startAutoRefresh(); // гарантируем что таймер перезапущен
                         }
+                        applyMode(savedMode);
                     }
                 })
                 .catch(function() {

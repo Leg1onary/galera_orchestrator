@@ -1817,15 +1817,22 @@
         function renderBootstrapCandidates() {
             var el = document.getElementById('bootstrapCandidates');
             if (!el) return;
+            // P0/P1 guard: нет нод
+            if (!clusterData.nodes || clusterData.nodes.length === 0) {
+                el.innerHTML = '<p style="color:var(--text-muted);font-size:var(--text-sm)">Нет нод в конфигурации</p>';
+                return;
+            }
             el.innerHTML = clusterData.nodes.map(function(node, i) {
+                // P0 guard: node.metrics может отсутствовать (нода только добавлена / offline в Real)
+                var seqno = (node.metrics && node.metrics.wsrep_last_committed) ? node.metrics.wsrep_last_committed : '—';
                 return '<label style="display:flex;align-items:center;gap:var(--space-3);background:var(--surface-2);' +
                     'border-radius:var(--radius-md);padding:var(--space-3) var(--space-4);cursor:pointer;' +
                     'border:1px solid var(--border)">' +
                     '<input type="radio" name="bootstrap" value="' + node.id + '" ' + (i===0?'checked':'') + '>' +
                     '<span style="font-weight:600">' + node.name + '</span>' +
-                    '<span style="font-family:var(--font-mono);font-size:var(--text-xs);color:var(--text-muted)">' + node.host + '</span>' +
+                    '<span style="font-family:var(--font-mono);font-size:var(--text-xs);color:var(--text-muted)">' + (node.host || '') + '</span>' +
                     '<span style="margin-left:auto;font-family:var(--font-mono);font-size:var(--text-xs)">seqno: ' +
-                    node.metrics.wsrep_last_committed + '</span>' +
+                    seqno + '</span>' +
                     '</label>';
             }).join('');
         }
@@ -1834,11 +1841,17 @@
         function renderSettingsNodes() {
             var el = document.getElementById('settingsNodeList');
             if (!el) return;
+            if (!clusterData.nodes || clusterData.nodes.length === 0) {
+                el.innerHTML = '<p style="color:var(--text-muted);font-size:var(--text-sm);padding:var(--space-4) 0">Ноды не добавлены</p>';
+                return;
+            }
             el.innerHTML = clusterData.nodes.map(function(node) {
+                // P0 guard: node.ssh может быть undefined (от Real API приходит ssh_port)
+                var sshPort = node.ssh || node.ssh_port || 22;
                 return '<div class="node-list-item">' +
                     '<div class="nli-info">' +
                     '<div class="nli-name">' + node.name + '</div>' +
-                    '<div class="nli-host">' + node.host + ':' + node.port + ' · SSH :' + node.ssh + '</div>' +
+                    '<div class="nli-host">' + (node.host || '') + ':' + (node.port || 3306) + ' · SSH :' + sshPort + '</div>' +
                     '</div>' +
                     '<span class="nli-role-badge badge-synced" style="font-size:var(--text-xs)">Node</span>' +
                     '<button class="btn btn-ghost btn-sm" onclick="App.editNode(\'' + node.id + '\')">Изменить</button>' +
@@ -1851,10 +1864,12 @@
             var el = document.getElementById('arbitratorBlock');
             if (!el) return;
             if (clusterData.arbitrator) {
+                // P1 guard: backend возвращает ssh_port, фронт хранит ssh
+                var arbSsh = clusterData.arbitrator.ssh || clusterData.arbitrator.ssh_port || 22;
                 el.innerHTML = '<div class="node-list-item">' +
                     '<div class="nli-info">' +
                     '<div class="nli-name">garbd</div>' +
-                    '<div class="nli-host">' + clusterData.arbitrator.host + ' · SSH :' + clusterData.arbitrator.ssh + '</div>' +
+                    '<div class="nli-host">' + (clusterData.arbitrator.host || '') + ' · SSH :' + arbSsh + '</div>' +
                     '</div>' +
                     '<span class="nli-role-badge" style="background:var(--warning-dim);color:var(--warning);font-size:var(--text-xs);padding:2px 8px;border-radius:9999px;font-weight:700">Arbitrator</span>' +
                     '<button class="btn btn-danger btn-sm" onclick="App.removeArbitrator()">Удалить арбитр</button>' +
@@ -2172,6 +2187,8 @@
                     headers: { 'Content-Type': 'application/json' },
                     body: JSON.stringify({ use_mock: mode === 'mock' })
                 }).catch(function(){});
+                // P1 fix: перезапускаем автополлинг со сброшенным таймером
+                startAutoRefresh();
                 // Немедленно загружаем данные нужного режима
                 if (mode === 'real') {
                     fetchRealData();
@@ -2417,58 +2434,83 @@
             fetch(apiBase + '/api/status')
                 .then(function(r) { if (!r.ok) throw new Error('HTTP ' + r.status); return r.json(); })
                 .then(function(data) {
-                    if (data && data.nodes && data.nodes.length > 0) {
-                        clusterData.nodes = data.nodes.map(function(nd) {
-                            // Backend returns flat objects — map to {state, metrics}
-                            var state = nd.wsrep_local_state_comment
-                                || (nd.online === false ? 'Offline' : 'Unknown');
-                            return {
-                                id:     nd.id || nd.name,
-                                name:   nd.name || nd.id,
-                                host:   nd.host || '',
-                                online: nd.online !== false,
-                                error:  nd.error || null,
-                                state:  state,
-                                metrics: {
-                                    wsrep_cluster_status:       nd.wsrep_cluster_status      || '—',
-                                    wsrep_cluster_size:         String(nd.wsrep_cluster_size || '0'),
-                                    wsrep_connected:            nd.wsrep_connected           || 'OFF',
-                                    wsrep_ready:                nd.wsrep_ready               || 'OFF',
-                                    wsrep_local_state_comment:  state,
-                                    wsrep_local_recv_queue:     String(nd.wsrep_local_recv_queue  || '0'),
-                                    wsrep_local_send_queue:     String(nd.wsrep_local_send_queue  || '0'),
-                                    wsrep_flow_control_paused:  String(nd.wsrep_flow_control_paused || '0.000'),
-                                    wsrep_cert_deps_distance:   String(nd.wsrep_cert_deps_distance || '0.00'),
-                                    wsrep_last_committed:       String(nd.wsrep_local_commits      || '0'),
-                                    wsrep_local_cert_failures:  String(nd.wsrep_local_cert_failures|| '0'),
-                                    wsrep_bf_aborts:            String(nd.wsrep_bf_aborts          || '0'),
-                                    wsrep_cluster_conf_id:      String(nd.wsrep_cluster_conf_id    || '0'),
-                                    wsrep_cluster_state_uuid:   nd.wsrep_cluster_state_uuid || '—',
-                                    wsrep_replicated_bytes:     nd.wsrep_replicated_bytes   || '—',
-                                    wsrep_received_bytes:       nd.wsrep_received_bytes     || '—',
-                                }
-                            };
-                        });
-                        clusterData.timestamp = new Date();
-                        _lastUpdateStr = clusterData.timestamp.toLocaleTimeString('ru-RU');
-                        _tickCount++;
-                        if (_tickCount % 3 === 0 || _tickCount === 1) {
-                            var _syn = clusterData.nodes.filter(function(n){ return n.state === 'Synced'; }).length;
-                            addLog('INFO', '[Real] Poll #' + _tickCount + ' — ' + _syn + '/' + clusterData.nodes.length + ' Synced');
-                        }
-                        renderAll();
-                    } else {
-                        addLog('WARN', '[Real] /api/status вернул пустой список нод');
+                    // P0 fix: обновляем clusterData всегда, даже при пустом списке нод
+                    var rawNodes = (data && data.nodes) ? data.nodes : [];
+                    clusterData.nodes = rawNodes.map(function(nd) {
+                        // Backend returns flat objects — map to {state, metrics}
+                        var state = nd.wsrep_local_state_comment
+                            || (nd.online === false ? 'Offline' : 'Unknown');
+                        return {
+                            id:     nd.id || nd.name,
+                            name:   nd.name || nd.id,
+                            host:   nd.host || '',
+                            port:   nd.port || 3306,
+                            ssh_port: nd.ssh_port || 22,
+                            online: nd.online !== false,
+                            error:  nd.error || null,
+                            state:  state,
+                            metrics: {
+                                wsrep_cluster_status:       nd.wsrep_cluster_status      || '—',
+                                wsrep_cluster_size:         String(nd.wsrep_cluster_size || '0'),
+                                wsrep_connected:            nd.wsrep_connected           || 'OFF',
+                                wsrep_ready:                nd.wsrep_ready               || 'OFF',
+                                wsrep_local_state_comment:  state,
+                                wsrep_local_recv_queue:     String(nd.wsrep_local_recv_queue  || '0'),
+                                wsrep_local_send_queue:     String(nd.wsrep_local_send_queue  || '0'),
+                                wsrep_flow_control_paused:  String(nd.wsrep_flow_control_paused || '0.000'),
+                                wsrep_cert_deps_distance:   String(nd.wsrep_cert_deps_distance || '0.00'),
+                                wsrep_last_committed:       String(nd.wsrep_local_commits      || '0'),
+                                wsrep_local_cert_failures:  String(nd.wsrep_local_cert_failures|| '0'),
+                                wsrep_bf_aborts:            String(nd.wsrep_bf_aborts          || '0'),
+                                wsrep_cluster_conf_id:      String(nd.wsrep_cluster_conf_id    || '0'),
+                                wsrep_cluster_state_uuid:   nd.wsrep_cluster_state_uuid || '—',
+                                wsrep_replicated_bytes:     nd.wsrep_replicated_bytes   || '—',
+                                wsrep_received_bytes:       nd.wsrep_received_bytes     || '—',
+                            }
+                        };
+                    });
+                    clusterData.timestamp = new Date();
+                    _lastUpdateStr = clusterData.timestamp.toLocaleTimeString('ru-RU');
+                    _tickCount++;
+                    if (rawNodes.length === 0) {
+                        addLog('WARN', '[Real] /api/status вернул пустой список нод (проверьте nodes.yaml)');
+                    } else if (_tickCount % 3 === 0 || _tickCount === 1) {
+                        var _syn = clusterData.nodes.filter(function(n){ return n.state === 'Synced'; }).length;
+                        addLog('INFO', '[Real] Poll #' + _tickCount + ' — ' + _syn + '/' + clusterData.nodes.length + ' Synced');
                     }
+                    renderAll();
                 })
                 .catch(function(e) {
                     addLog('WARN', 'API недоступен: ' + e.message);
                 });
         }
 
-        // При загрузке — спросить backend какой режим сохранён
+        // P4 fix: startAutoRefresh должна быть объявлена ДО initFromBackend
+        startAutoRefresh();
+
+        // При загрузке — спросить backend какой режим сохранён + восстановить префы
         (function initFromBackend() {
             var apiBase = (document.getElementById('apiUrl') ? document.getElementById('apiUrl').value.replace(/\/+$/, '') : 'http://localhost:8000');
+
+            // P2: восстановить префы (pollInterval, тема) из /api/prefs
+            fetch(apiBase + '/api/prefs')
+                .then(function(r) { return r.json(); })
+                .then(function(prefs) {
+                    if (prefs.refresh_interval) {
+                        _pollIntervalMs = prefs.refresh_interval * 1000;
+                        startAutoRefresh();
+                        ['pollIntervalSelect', 'pollInterval'].forEach(function(id) {
+                            var el = document.getElementById(id);
+                            if (el) el.value = String(prefs.refresh_interval);
+                        });
+                    }
+                    if (prefs.theme) {
+                        setTheme(prefs.theme === 'dark');
+                    }
+                })
+                .catch(function() {});
+
+            // Восстановить режим данных
             fetch(apiBase + '/api/config/mode')
                 .then(function(r) { return r.json(); })
                 .then(function(data) {
@@ -2491,6 +2533,7 @@
                             clusterData = { nodes: [], timestamp: null };
                             addLog('INFO', 'Режим восстановлен: Real (из nodes.yaml)');
                             fetchRealData();
+                            startAutoRefresh(); // гарантируем что таймер перезапущен
                         }
                     }
                 })
@@ -2498,8 +2541,6 @@
                     // backend недоступен — остаёмся в mock
                 });
         })();
-
-        startAutoRefresh();
 
     })();
 </script>

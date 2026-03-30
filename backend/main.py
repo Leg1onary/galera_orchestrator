@@ -260,14 +260,22 @@ async def remove_arbitrator():
     return {"ok": True}
 
 # ── RELOAD ────────────────────────────────────────────────────
-@app.post("/api/reload")
-async def reload_config():
+async def _do_reload():
     cfg   = load_config()
     nodes = [n["id"] for n in cfg.get("nodes", []) if n.get("enabled")]
     arb   = cfg.get("arbitrator", {}).get("enabled", False)
     mode  = "mock" if cfg.get("settings", {}).get("use_mock", True) else "real"
     log.info(f"Config reloaded | nodes={nodes} | arbitrator={arb} | mode={mode}")
     return {"ok": True, "nodes": nodes, "arbitrator": arb, "mode": mode}
+
+@app.post("/api/reload")
+async def reload_config():
+    return await _do_reload()
+
+# Алиас для совместимости с ТЗ
+@app.post("/api/config/reload")
+async def reload_config_alias():
+    return await _do_reload()
 
 # ── UI PREFERENCES (theme etc.) ──────────────────────────────
 PREFS_PATH = Path(__file__).parent.parent / "config" / "ui_prefs.json"

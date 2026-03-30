@@ -579,15 +579,60 @@ async def get_garbd():
     except Exception as e:
         return {"enabled": True, "online": False, "host": arb.get("host",""), "error": str(e)}
 
+# ── NODE SSH PING ─────────────────────────────────────────────
+@app.get("/api/node/{node_id}/ping")
+async def node_ping(node_id: str):
+    """Quick SSH reachability check + systemctl is-active."""
+    cfg      = load_config()
+    use_mock = cfg.get("settings", {}).get("use_mock", True)
+    node     = next((n for n in cfg.get("nodes", []) if n["id"] == node_id), None)
+    if not node:
+        raise HTTPException(404, f"Node '{node_id}' not found")
+
+    if use_mock:
+        return {"ok": True, "mock": True, "node_id": node_id,
+                "reachable": True, "latency_ms": 2, "service": "active"}
+
+    import time
+    try:
+        import paramiko
+    except ImportError:
+        raise HTTPException(500, "paramiko not installed")
+
+    t0 = time.monotonic()
+    try:
+        client = paramiko.SSHClient()
+        client.set_missing_host_key_policy(paramiko.AutoAddPolicy())
+        client.connect(
+            node.get("host", ""), port=int(node.get("ssh_port", 22)),
+            username=node.get("ssh_user", "root"),
+            key_filename=str(Path(node.get("ssh_key", "~/.ssh/id_rsa")).expanduser()),
+            timeout=6, banner_timeout=6,
+        )
+        _, so, _ = client.exec_command("systemctl is-active mariadb.service", timeout=5)
+        service_state = so.read().decode(errors="replace").strip()
+        client.close()
+        latency = int((time.monotonic() - t0) * 1000)
+        return {"ok": True, "mock": False, "node_id": node_id,
+                "reachable": True, "latency_ms": latency, "service": service_state}
+    except Exception as e:
+        latency = int((time.monotonic() - t0) * 1000)
+        return {"ok": False, "mock": False, "node_id": node_id,
+                "reachable": False, "latency_ms": latency,
+                "service": "unknown", "error": str(e)}
+
+
 # ── NODE SSH ACTION ──────────────────────────────────────────
 class NodeActionPayload(BaseModel):
-    action: str  # start | stop | restart | rejoin
+    action: str  # start | stop | restart | rejoin | set_read_only | set_read_write
 
 ALLOWED_ACTIONS = {
-    "start":   "systemctl start mariadb.service",
-    "stop":    "systemctl stop mariadb.service",
-    "restart": "systemctl restart mariadb.service",
-    "rejoin":  "systemctl restart mariadb.service",
+    "start":          "systemctl start mariadb.service",
+    "stop":           "systemctl stop mariadb.service",
+    "restart":        "systemctl restart mariadb.service",
+    "rejoin":         "systemctl restart mariadb.service",
+    "set_read_only":  'mysql -e "SET GLOBAL read_only = ON;"',
+    "set_read_write": 'mysql -e "SET GLOBAL read_only = OFF;"',
 }
 
 @app.post("/api/node/{node_id}/action")

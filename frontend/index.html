@@ -807,10 +807,35 @@
         <div class="header-spacer"></div>
 
         <div style="display:flex;align-items:center;gap:var(--space-3);flex-wrap:wrap">
+
+            <!-- ENV switcher: TEST / PROD -->
+            <div style="display:flex;align-items:center;gap:3px;background:var(--surface-2);border:1px solid var(--border);border-radius:var(--radius-full);padding:3px">
+                <button id="btnEnvTest" class="btn btn-sm active"
+                        style="height:26px;padding:0 10px;font-size:0.72rem;border-radius:9999px;font-weight:700;background:var(--primary);color:#fff"
+                        onclick="App.setEnv('test')">TEST</button>
+                <button id="btnEnvProd" class="btn btn-ghost btn-sm"
+                        style="height:26px;padding:0 10px;font-size:0.72rem;border-radius:9999px;font-weight:700"
+                        onclick="App.setEnv('prod')">PROD</button>
+            </div>
+
+            <!-- Cluster status badge -->
             <div class="cluster-badge" id="headerStatus">
                 <span class="status-dot ok" id="headerDot"></span>
-                <span id="headerStatusText">TEST · Primary · 2/2</span>
+                <span id="headerStatusText">—</span>
             </div>
+
+            <!-- Mock / Real toggle -->
+            <div style="display:flex;align-items:center;gap:3px;background:var(--surface-2);border:1px solid var(--border);border-radius:var(--radius-full);padding:3px"
+                 title="Режим: Mock — симуляция, Real — реальные данные">
+                <button id="hdrBtnMock" class="btn btn-sm active"
+                        style="height:26px;padding:0 10px;font-size:0.72rem;border-radius:9999px;font-weight:700;background:var(--warning);color:#fff"
+                        onclick="App.setDataMode('mock')">MOCK</button>
+                <button id="hdrBtnReal" class="btn btn-ghost btn-sm"
+                        style="height:26px;padding:0 10px;font-size:0.72rem;border-radius:9999px;font-weight:700"
+                        onclick="App.setDataMode('real')">REAL</button>
+            </div>
+
+            <!-- Poll interval + refresh -->
             <div style="display:flex;align-items:center;gap:var(--space-2);padding-left:var(--space-3);border-left:1px solid rgba(255,255,255,0.12)">
                 <span style="font-size:0.72rem;color:var(--color-text-muted);white-space:nowrap">Опрос:</span>
                 <select class="form-input" id="pollIntervalSelect"
@@ -831,9 +856,7 @@
                     </svg>
                     Обновить
                 </button>
-                <span style="font-size:0.72rem;color:var(--color-text-muted);white-space:nowrap">
-                    Обновлено:&nbsp;<span id="lastUpdateTime" style="color:var(--color-text)">—</span>
-                </span>
+                <span id="lastUpdateTime" style="font-size:0.72rem;color:var(--color-text)">—</span>
             </div>
         </div>
 
@@ -885,11 +908,12 @@
             <div class="page-header">
                 <div>
                     <h1 class="page-title">Обзор кластера</h1>
-                    <p class="page-subtitle">Тестовый контур · 2 ноды · без арбитра</p>
+                    <p class="page-subtitle" id="overviewSubtitle">Тестовый контур · симуляция</p>
                 </div>
-                <div class="flex-row">
+                <!-- Сценарии — только в MOCK режиме -->
+                <div class="flex-row" id="scenarioBlock">
                     <div style="display:flex;align-items:center;gap:var(--space-2)">
-                        <span style="font-size:var(--text-xs);font-weight:600;text-transform:uppercase;letter-spacing:.07em;color:var(--text-muted)">Симуляция</span>
+                        <span style="font-size:var(--text-xs);font-weight:600;text-transform:uppercase;letter-spacing:.07em;color:var(--text-muted)">Сценарий</span>
                         <select class="form-input" id="scenarioSelect" style="width:230px" onchange="App.applyScenario(this.value)">
                             <option value="normal">✅ Normal — All Synced</option>
                             <option value="gc01_down">🔴 gc01 — Node Down</option>
@@ -897,7 +921,11 @@
                             <option value="flow_control">🟡 Flow Control Active</option>
                         </select>
                     </div>
-
+                </div>
+                <!-- LIVE badge — только в REAL режиме -->
+                <div id="realModeBadge" style="display:none;align-items:center;gap:var(--space-2);background:var(--success-dim);border:1px solid var(--success);border-radius:var(--radius-full);padding:4px 14px">
+                    <span style="width:8px;height:8px;border-radius:50%;background:var(--success);display:inline-block"></span>
+                    <span style="font-size:var(--text-xs);font-weight:700;color:var(--success)">LIVE · REAL DATA</span>
                 </div>
             </div>
 
@@ -1119,11 +1147,11 @@
                 </div>
             </div>
 
-            <!-- Arbitrator -->
-            <div class="form-section">
+            <!-- Arbitrator — виден только в PROD-контуре -->
+            <div class="form-section" id="arbitratorSection" style="display:none">
                 <div class="form-section-title">
                     <svg width="20" height="20" viewBox="0 0 24 24" fill="none" stroke="var(--warning)" stroke-width="2"><polygon points="12 2 15.09 8.26 22 9.27 17 14.14 18.18 21.02 12 17.77 5.82 21.02 7 14.14 2 9.27 8.91 8.26 12 2"/></svg>
-                    Арбитр (garbd)
+                    Арбитр (garbd) — PROD-контур
                 </div>
                 <div id="arbitratorBlock"></div>
             </div>
@@ -1682,18 +1710,36 @@
                     '<div class="metric-val ' + mc + '">' + p[1] + '</div></div>';
             }).join('');
 
-            var actionsHtml = isOffline
-                ? '<button class="btn btn-success btn-sm" onclick="App.nodeAction(\'' + node.id + '\',\'start\')">Start MariaDB</button>'
-                + '<button class="btn btn-primary btn-sm" onclick="App.nodeAction(\'' + node.id + '\',\'rejoin\')">Rejoin</button>'
-                : '<button class="btn btn-primary btn-sm" onclick="App.nodeAction(\'' + node.id + '\',\'rejoin\')">Rejoin</button>'
-                + '<button class="btn btn-warning btn-sm" onclick="App.nodeAction(\'' + node.id + '\',\'restart\')">Restart MariaDB</button>'
-                + '<button class="btn btn-danger btn-sm" onclick="App.nodeAction(\'' + node.id + '\',\'stop\')">Stop MariaDB</button>';
+            // Пинг-бадж (ID для обновления через pingNode)
+            var pingBadge = '<span class="node-ping-badge ping-wait" id="ping-' + node.id + '" title="нажмите Ping">SSH ping</span>';
+
+            // Кнопки — все сразу видны (но Start/Rejoin ставим первыми если offline)
+            var a = function(action, cls, iconPath, label) {
+                return '<button class="btn ' + cls + ' btn-sm" onclick="App.nodeAction(\'' + node.id + '\',\'' + action + '\')">' +
+                    '<svg width="12" height="12" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2.5">' + iconPath + '</svg>' +
+                    label + '</button>';
+            };
+            var btnPing    = '<button class="btn btn-ghost btn-sm" onclick="App.pingNode(\'' + node.id + '\')">' +
+                '<svg width="12" height="12" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2.5"><circle cx="12" cy="12" r="10"/><polyline points="12 8 12 12 14 14"/></svg>' +
+                'Ping</button>';
+
+            var actionsHtml = (
+                a('start',          'btn-success', '<polygon points="5 3 19 12 5 21 5 3"/>',       'Start') +
+                a('stop',           'btn-danger',  '<rect x="6" y="6" width="12" height="12"/>',  'Stop') +
+                a('restart',        'btn-warning', '<polyline points="23 4 23 10 17 10"/><path d="M20.49 15a9 9 0 1 1-.02-8.49"/>', 'Restart') +
+                a('rejoin',         'btn-primary', '<polyline points="23 4 23 10 17 10"/><path d="M20.49 15a9 9 0 1 1-.02-8.49"/>', 'Rejoin') +
+                a('set_read_only',  'btn-ghost',   '<rect x="3" y="11" width="18" height="11" rx="2"/><path d="M7 11V7a5 5 0 0 1 10 0v4"/>', 'R/O') +
+                a('set_read_write', 'btn-ghost',   '<rect x="3" y="11" width="18" height="11" rx="2"/><path d="M7 11V7a5 5 0 0 1 5-4.9"/>', 'R/W') +
+                btnPing
+            );
 
             return '<div class="node-card ' + sc + '">' +
                 '<div class="node-header">' +
                 '<div><div class="node-name">' + node.name + '</div>' +
-                '<div class="node-host">' + node.host + ':' + node.port + '</div></div>' +
+                '<div class="node-host">' + (node.host || '') + ':' + (node.port || 3306) + '</div></div>' +
+                '<div style="display:flex;align-items:center;gap:6px">' + pingBadge +
                 '<span class="node-state-badge ' + bc + '">' + node.state + '</span>' +
+                '</div>' +
                 '</div>' +
                 '<div class="node-metrics">' + metricsHtml + '</div>' +
                 '<div class="node-actions">' + actionsHtml + '</div>' +
@@ -1931,53 +1977,69 @@
         }
 
         // ---- MODE SWITCH (internal) ----
+        // ---- MODE/ENV HELPERS ----
+        function _syncModeUI(mode) {
+            var hm = document.getElementById('hdrBtnMock');
+            var hr = document.getElementById('hdrBtnReal');
+            if (hm) { hm.style.background = mode === 'mock' ? 'var(--warning)' : ''; hm.style.color = mode === 'mock' ? '#fff' : ''; }
+            if (hr) { hr.style.background = mode === 'real' ? 'var(--success)' : ''; hr.style.color = mode === 'real' ? '#fff' : ''; }
+            var scnBlock  = document.getElementById('scenarioBlock');
+            var realBadge = document.getElementById('realModeBadge');
+            if (scnBlock)  scnBlock.style.display  = mode === 'mock' ? '' : 'none';
+            if (realBadge) realBadge.style.display  = mode === 'real' ? 'flex' : 'none';
+            var hint = document.getElementById('dataModeHint');
+            if (hint) hint.textContent = mode === 'mock'
+                ? 'Активен Mock-режим — данные генерируются в браузере'
+                : 'Активен Real-режим — данные запрашиваются с backend API';
+        }
+
+        function _syncEnvUI(env) {
+            var bt = document.getElementById('btnEnvTest');
+            var bp = document.getElementById('btnEnvProd');
+            if (bt) { bt.style.background = env === 'test' ? 'var(--primary)' : ''; bt.style.color = env === 'test' ? '#fff' : ''; }
+            if (bp) { bp.style.background = env === 'prod' ? 'var(--primary)' : ''; bp.style.color = env === 'prod' ? '#fff' : ''; }
+            var arbS = document.getElementById('arbitratorSection');
+            if (arbS) arbS.style.display = env === 'prod' ? '' : 'none';
+        }
+
         function applyMode(mode) {
             _dataMode = mode;
+            lsSet(LS_MODE, mode); // localStorage — primary state
 
             if (mode === 'mock') {
-                // Полностью восстанавливаем эталонные mock-данные — следов real не остаётся
-                clusterData = makeMockData();
+                clusterData = makeMockData(); // полный ресет эталона, следов real нет
             } else {
-                // Чистим mock-данные перед первым реальным запросом
-                clusterData = { nodes: [], timestamp: null };
+                clusterData = { nodes: [], timestamp: null }; // чистый скелет
             }
 
             _lastUpdateStr = '—';
             var lu0 = document.getElementById('lastUpdateTime');
             if (lu0) lu0.textContent = '—';
 
-            // Обновляем кнопки в header
-            var btnMock = document.getElementById('btnMock');
-            var btnReal = document.getElementById('btnReal');
-            var hint    = document.getElementById('dataModeHint');
-            if (btnMock) btnMock.className = mode === 'mock' ? 'btn btn-primary' : 'btn btn-ghost';
-            if (btnReal) btnReal.className = mode === 'real' ? 'btn btn-primary' : 'btn btn-ghost';
-            if (hint) {
-                hint.textContent = mode === 'mock'
-                    ? 'Сейчас: симуляция — данные генерируются локально в браузере'
-                    : 'Сейчас: Real — данные запрашиваются с backend API';
-            }
+            _syncModeUI(mode);
 
-            addLog('INFO', 'Режим данных переключён: ' + (mode === 'mock' ? 'Mock (симуляция)' : 'Real (backend API)'));
+            addLog('INFO', 'Режим: ' + (mode === 'mock' ? 'MOCK (симуляция)' : 'REAL (backend API)'));
             toast(mode === 'real' ? 'info' : 'success', 'Режим: ' + (mode === 'mock' ? 'Mock' : 'Real'));
 
-            // Персистим в nodes.yaml через backend
+            // Синх в nodes.yaml (побочно, secondary)
             var apiBase = (document.getElementById('apiUrl') ? document.getElementById('apiUrl').value.replace(/\/+$/, '') : 'http://localhost:8000');
             fetch(apiBase + '/api/config/mode', {
-                method: 'POST',
-                headers: { 'Content-Type': 'application/json' },
+                method: 'POST', headers: { 'Content-Type': 'application/json' },
                 body: JSON.stringify({ use_mock: mode === 'mock' })
             }).catch(function(){});
 
-            // Перезапускаем таймер поллинга
             startAutoRefresh();
 
-            // Немедленно загружаем данные
-            if (mode === 'real') {
-                fetchRealData();
-            } else {
-                renderAll();
-            }
+            if (mode === 'real') { fetchRealData(); } else { renderAll(); }
+        }
+
+        function applyEnv(env) {
+            _env = env;
+            lsSet(LS_ENV, env);
+            _syncEnvUI(env);
+            addLog('INFO', 'Контур: ' + env.toUpperCase());
+            toast('info', 'Контур: ' + env.toUpperCase());
+            renderAll();
         }
 
         // ---- RENDER ALL ----
@@ -1991,6 +2053,10 @@
             renderSettingsNodes();
             renderArbitratorBlock();
             renderYamlPreview();
+            // subtitle
+            var sub = document.getElementById('overviewSubtitle');
+            if (sub) sub.textContent = (_env === 'prod' ? 'Продуктивный' : 'Тестовый') +
+                ' контур · ' + (_dataMode === 'mock' ? 'симуляция' : 'реальные данные');
         }
 
         // ---- PUBLIC API ----
@@ -2208,12 +2274,12 @@
             },
 
             setDataMode: function(mode) {
-                if (mode === _dataMode) return; // уже в этом режиме
+                if (mode === _dataMode) return;
 
-                // real → mock: предупреждение — боевые данные будут стерты
+                // real → mock: предупреждение — боевые данные будут стёрты
                 if (mode === 'mock' && _dataMode === 'real') {
-                    confirm('⚠️', 'Переключиться в Mock-режим?',
-                        'Все данные реального мониторинга будут стёрты. Вместо них загрузятся тестовые данные симуляции.',
+                    confirm('⚠️', 'Выйти из боевого режима?',
+                        'Все данные реального мониторинга будут стёрты. Вместо них загрузятся тестовые данные симуляции. Продолжить?',
                         'btn-warning'
                     ).then(function(ok) {
                         if (!ok) return;
@@ -2222,8 +2288,35 @@
                     return;
                 }
 
-                // mock → real: предупреждений нет, просто переключаем
+                // mock → real: без предупреждений
                 applyMode(mode);
+            },
+
+            setEnv: function(env) {
+                if (env === _env) return;
+                applyEnv(env);
+            },
+
+            pingNode: function(nodeId) {
+                var badge = document.getElementById('ping-' + nodeId);
+                if (badge) { badge.className = 'node-ping-badge ping-wait'; badge.textContent = '⏳ ping...'; }
+                var apiBase = (document.getElementById('apiUrl') ? document.getElementById('apiUrl').value.replace(/\/+$/, '') : 'http://localhost:8000');
+                fetch(apiBase + '/api/node/' + nodeId + '/ping')
+                    .then(function(r) { return r.json(); })
+                    .then(function(res) {
+                        if (badge) {
+                            badge.className = 'node-ping-badge ' + (res.reachable ? 'ping-ok' : 'ping-fail');
+                            badge.textContent = res.reachable ? ('✓ ' + res.latency_ms + 'ms · ' + res.service) : '✗ unreachable';
+                        }
+                        addLog(res.reachable ? 'INFO' : 'ERROR',
+                            nodeId + ': ping → ' + (res.reachable
+                                ? res.latency_ms + 'ms, svc=' + res.service
+                                : 'UNREACHABLE' + (res.error ? ' — ' + res.error : '')));
+                    })
+                    .catch(function(e) {
+                        if (badge) { badge.className = 'node-ping-badge ping-fail'; badge.textContent = '✗ error'; }
+                        addLog('ERROR', nodeId + ': ping failed — ' + e.message);
+                    });
             },
 
             reloadYaml: function() {
@@ -2418,19 +2511,65 @@
             }
         };
 
-        // ---- INIT ----
-        addLog('OK',   'Galera Orchestrator запущен');
-        addLog('INFO', 'Тестовый контур: 2 ноды, без арбитра');
-        addLog('INFO', 'Подключение к gc01 (10.0.0.11) — OK');
-        addLog('INFO', 'Подключение к gc02 (10.0.0.12) — OK');
-        renderAll();
-
-        // ---- AUTO-REFRESH (управляемый) ----
+        // ---- AUTO-REFRESH STATE VARS ---- (declare BEFORE init so everything can use them)
         var _pollIntervalMs = 5000;
         var _pollTimer = null;
-        var _dataMode = 'mock'; // 'mock' | 'real'
+        var _dataMode = 'mock'; // значение перезапишется restoreStateFromLS
+        var _env = 'test';      // 'test' | 'prod'
         var _tickCount = 0;
         var _lastUpdateStr = '—';
+
+        // ---- LOCALSTORAGE HELPERS ----
+        var LS_MODE = 'galera_data_mode';
+        var LS_ENV  = 'galera_env';
+        function lsGet(key, def) {
+            try { var v = localStorage.getItem(key); return v !== null ? v : def; } catch(e) { return def; }
+        }
+        function lsSet(key, val) {
+            try { localStorage.setItem(key, val); } catch(e) {}
+        }
+
+        // ---- INIT: restore state from localStorage IMMEDIATELY (no flicker) ----
+        (function restoreStateFromLS() {
+            var savedMode = lsGet(LS_MODE, 'mock');
+            var savedEnv  = lsGet(LS_ENV,  'test');
+
+            _dataMode = savedMode;
+            _env      = savedEnv;
+
+            // Применяем mock данные или пустой скелет
+            if (savedMode === 'mock') {
+                clusterData = makeMockData();
+            } else {
+                clusterData = { nodes: [], timestamp: null };
+            }
+
+            // Header кнопки режима
+            var hm = document.getElementById('hdrBtnMock');
+            var hr = document.getElementById('hdrBtnReal');
+            if (hm) { hm.style.background = savedMode === 'mock' ? 'var(--warning)' : ''; hm.style.color = savedMode === 'mock' ? '#fff' : ''; }
+            if (hr) { hr.style.background = savedMode === 'real' ? 'var(--success)' : ''; hr.style.color = savedMode === 'real' ? '#fff' : ''; }
+
+            // Header кнопки окружения
+            var bt = document.getElementById('btnEnvTest');
+            var bp = document.getElementById('btnEnvProd');
+            if (bt) { bt.style.background = savedEnv === 'test' ? 'var(--primary)' : ''; bt.style.color = savedEnv === 'test' ? '#fff' : ''; }
+            if (bp) { bp.style.background = savedEnv === 'prod' ? 'var(--primary)' : ''; bp.style.color = savedEnv === 'prod' ? '#fff' : ''; }
+
+            // Overview элементы
+            var scnBlock  = document.getElementById('scenarioBlock');
+            var realBadge = document.getElementById('realModeBadge');
+            if (scnBlock)  scnBlock.style.display  = savedMode === 'mock' ? '' : 'none';
+            if (realBadge) realBadge.style.display  = savedMode === 'real' ? 'flex' : 'none';
+
+            // Арбитр — секция только для PROD
+            var arbS = document.getElementById('arbitratorSection');
+            if (arbS) arbS.style.display = savedEnv === 'prod' ? '' : 'none';
+        })();
+
+        addLog('OK',   'Galera Orchestrator запущен');
+        addLog('INFO', 'Режим: ' + _dataMode.toUpperCase() + ' · Контур: ' + _env.toUpperCase());
+        renderAll();
 
         function startAutoRefresh() {
             if (_pollTimer) clearInterval(_pollTimer);

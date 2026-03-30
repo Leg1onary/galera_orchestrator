@@ -19,14 +19,6 @@ real_nodes:
   ssh_user: root
   ssh_key: ~/.ssh/id_rsa
   enabled: true
-- id: gc02
-  name: gc02
-  host: 192.168.1.11
-  port: 3306
-  ssh_port: 22
-  ssh_user: root
-  ssh_key: ~/.ssh/id_rsa
-  enabled: true
 mock_nodes:
 - id: gc01
   name: gc01
@@ -37,11 +29,11 @@ mock_nodes:
   ssh_key: ~/.ssh/id_rsa
   enabled: true
 arbitrator:
-  enabled: false
-  host: ''
+  host: 10.0.0.13
   ssh_port: 22
   ssh_user: root
   ssh_key: ~/.ssh/id_rsa
+  enabled: true
 db:
   user: monitor
   password: monitor_pass

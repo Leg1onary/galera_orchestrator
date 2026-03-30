@@ -228,13 +228,13 @@ async def delete_node(node_id: str):
     if len(cfg["nodes"]) == before:
         raise HTTPException(404, f"Node '{node_id}' not found")
 
-    # Also remove from snapshot
-    snap_key = "mock_nodes" if use_mock else "real_nodes"
-    if snap_key in cfg:
-        cfg[snap_key] = [n for n in cfg[snap_key] if n["id"] != node_id]
+    # Remove from BOTH snapshots (regardless of current mode)
+    for snap_key in ("mock_nodes", "real_nodes"):
+        if snap_key in cfg:
+            cfg[snap_key] = [n for n in cfg[snap_key] if n["id"] != node_id]
 
     save_config(cfg)
-    _push_event("info", f"Node removed: {node_id}", "config")
+    _push_event("warning", f"Node removed: {node_id}", "config")
     return {"ok": True}
 
 # ── ARBITRATOR ────────────────────────────────────────────────

@@ -1608,7 +1608,10 @@
             var n0 = activeNodes[0].metrics;
             var n1 = activeNodes.length > 1 ? activeNodes[1].metrics : n0;
             var synced = clusterData.nodes.filter(function(n) { return n.state === 'Synced'; }).length;
-            var clSize = parseInt(n0.wsrep_cluster_size) || 0;
+            // Берём cluster_size как максимум по всем онлайн нодам (избегаем стейла)
+            var clSize = Math.max.apply(null, activeNodes.map(function(n){
+                return parseInt(n.metrics.wsrep_cluster_size) || 0;
+            }));
             var clStatus = n0.wsrep_cluster_status;
             var fcOk = (parseFloat(n0.wsrep_flow_control_paused) < 0.05 && parseFloat(n1.wsrep_flow_control_paused) < 0.05);
             var certFail = '0';
@@ -1946,11 +1949,18 @@
                     if (key !== 'normal') scenarios[key]();
                     renderAll();
                     toast('info', 'Сценарий применён: ' + key);
+                    // Синхронизируем backend mock
+                    var apiBase = (document.getElementById('apiUrl') ? document.getElementById('apiUrl').value.replace(/\/+$/, '') : 'http://localhost:8000');
+                    fetch(apiBase + '/api/scenario/' + key, { method: 'POST' }).catch(function(){});
                 }
             },
 
             refreshAll: function() {
-                renderAll();
+                if (_dataMode === 'real') {
+                    fetchRealData();
+                } else {
+                    renderAll();
+                }
                 addLog('INFO', 'Метрики обновлены вручную.');
                 toast('success', 'Данные обновлены');
             },
@@ -1981,44 +1991,74 @@
                         msg:   'systemctl restart mariadb.service — нода переподключится через IST/SST.',
                         icon:  '🔗', ok: 'btn-primary' },
                     start:   { title: 'Start MariaDB на ' + node.name + '?',
-                        msg:   'Запустить sервис и присоединиться к кластеру.',
+                        msg:   'Запустить сервис и присоединиться к кластеру.',
                         icon:  '▶️', ok: 'btn-success' }
                 };
                 var d = msgs[action];
                 if (!d) return;
                 confirm(d.icon, d.title, d.msg, d.ok).then(function(ok) {
                     if (!ok) return;
-                    if (action === 'stop') {
-                        node.state = 'Offline';
-                        addLog('WARN', action + ' выполнен на ' + node.name + ' (симуляция)');
-                        toast('warning', node.name + ': MariaDB остановлена');
-                    } else if (action === 'start' || action === 'rejoin') {
-                        node.state = 'Joiner';
-                        addLog('INFO', node.name + ': Joiner — ожидаем IST/SST...');
-                        toast('info', node.name + ': подключается к кластеру...');
-                        setTimeout(function() {
-                            node.state = 'Synced';
-                            node.metrics.wsrep_local_state_comment = 'Synced';
-                            node.metrics.wsrep_connected = 'ON';
-                            node.metrics.wsrep_ready = 'ON';
-                            node.metrics.wsrep_cluster_status = 'Primary';
-                            node.metrics.wsrep_cluster_size = '2';
-                            addLog('OK', node.name + ': успешно подключена — Synced');
-                            toast('success', node.name + ': Synced ✓');
-                            renderAll();
-                        }, 2200);
-                    } else if (action === 'restart') {
-                        node.state = 'Joiner';
-                        addLog('INFO', node.name + ': restart — кратковременный Joiner...');
-                        toast('info', node.name + ': перезапуск...');
-                        setTimeout(function() {
-                            node.state = 'Synced';
-                            addLog('OK', node.name + ': перезапущена, Synced');
-                            toast('success', node.name + ': Synced ✓');
-                            renderAll();
-                        }, 1800);
+                    if (_dataMode === 'real') {
+                        // Real mode — SSH через backend API
+                        var apiBase = (document.getElementById('apiUrl') ? document.getElementById('apiUrl').value.replace(/\/+$/, '') : 'http://localhost:8000');
+                        node.state = (action === 'stop') ? 'Offline' : 'Joiner';
+                        renderAll();
+                        fetch(apiBase + '/api/node/' + nodeId + '/action', {
+                            method: 'POST',
+                            headers: { 'Content-Type': 'application/json' },
+                            body: JSON.stringify({ action: action })
+                        })
+                        .then(function(r) { return r.json(); })
+                        .then(function(res) {
+                            var lvl = res.ok ? 'OK' : 'ERROR';
+                            addLog(lvl, node.name + ': ' + action + ' → exit=' + res.exit_code + (res.stderr ? ' | ' + res.stderr : ''));
+                            toast(res.ok ? 'success' : 'error', node.name + ': ' + action + (res.ok ? ' ✓' : ' ✗'));
+                            setTimeout(fetchRealData, 1500);
+                        })
+                        .catch(function(e) {
+                            addLog('ERROR', node.name + ': ' + action + ' failed — ' + e.message);
+                            toast('error', action + ' failed: ' + e.message);
+                            fetchRealData();
+                        });
+                    } else {
+                        // Mock mode — симуляция
+                        if (action === 'stop') {
+                            node.state = 'Offline';
+                            node.metrics.wsrep_cluster_status = 'non-Primary';
+                            node.metrics.wsrep_connected = 'OFF';
+                            node.metrics.wsrep_ready = 'OFF';
+                            node.metrics.wsrep_local_state_comment = 'Disconnected';
+                            addLog('WARN', action + ' выполнен на ' + node.name + ' (симуляция)');
+                            toast('warning', node.name + ': MariaDB остановлена');
+                        } else if (action === 'start' || action === 'rejoin') {
+                            node.state = 'Joiner';
+                            addLog('INFO', node.name + ': Joiner — ожидаем IST/SST...');
+                            toast('info', node.name + ': подключается к кластеру...');
+                            setTimeout(function() {
+                                node.state = 'Synced';
+                                node.metrics.wsrep_local_state_comment = 'Synced';
+                                node.metrics.wsrep_connected = 'ON';
+                                node.metrics.wsrep_ready = 'ON';
+                                node.metrics.wsrep_cluster_status = 'Primary';
+                                node.metrics.wsrep_cluster_size = String(clusterData.nodes.filter(function(n){ return n.state !== 'Offline'; }).length);
+                                addLog('OK', node.name + ': успешно подключена — Synced');
+                                toast('success', node.name + ': Synced ✓');
+                                renderAll();
+                            }, 2200);
+                        } else if (action === 'restart') {
+                            node.state = 'Joiner';
+                            addLog('INFO', node.name + ': restart — кратковременный Joiner...');
+                            toast('info', node.name + ': перезапуск...');
+                            setTimeout(function() {
+                                node.state = 'Synced';
+                                node.metrics.wsrep_local_state_comment = 'Synced';
+                                addLog('OK', node.name + ': перезапущена, Synced');
+                                toast('success', node.name + ': Synced ✓');
+                                renderAll();
+                            }, 1800);
+                        }
+                        renderAll();
                     }
-                    renderAll();
                 });
             },
 
@@ -2033,10 +2073,26 @@
                     if (!ok) return;
                     addLog('WARN', 'Bootstrap запущен на ' + chosen + ' — galera_new_cluster');
                     toast('warning', 'Bootstrap запущен на ' + chosen);
-                    setTimeout(function() {
-                        addLog('OK', chosen + ': Primary кластер запущен. Ожидание остальных нод.');
-                        toast('success', 'Кластер bootstrapped ✓');
-                    }, 1500);
+                    if (_dataMode === 'real') {
+                        var apiBase = (document.getElementById('apiUrl') ? document.getElementById('apiUrl').value.replace(/\/+$/, '') : 'http://localhost:8000');
+                        fetch(apiBase + '/api/bootstrap', {
+                            method: 'POST',
+                            headers: { 'Content-Type': 'application/json' },
+                            body: JSON.stringify({ candidate: chosen })
+                        })
+                        .then(function(r) { return r.json(); })
+                        .then(function(res) {
+                            addLog(res.ok ? 'OK' : 'ERROR', 'Bootstrap ' + chosen + ': ' + (res.stdout || res.error || 'done'));
+                            toast(res.ok ? 'success' : 'error', 'Bootstrap ' + (res.ok ? 'успешен ✓' : 'ошибка ✗'));
+                            setTimeout(fetchRealData, 2000);
+                        })
+                        .catch(function(e) { toast('error', 'Bootstrap failed: ' + e.message); });
+                    } else {
+                        setTimeout(function() {
+                            addLog('OK', chosen + ': Primary кластер запущен. Ожидание остальных нод.');
+                            toast('success', 'Кластер bootstrapped ✓');
+                        }, 1500);
+                    }
                 });
             },
 
@@ -2048,18 +2104,34 @@
                     if (!ok) return;
                     addLog('INFO', nodeId + ': Rejoin (' + method + ')');
                     toast('info', nodeId + ': Rejoin запущен...');
-                    setTimeout(function() {
-                        var node = clusterData.nodes.find(function(n) { return n.id === nodeId; });
-                        if (node) {
-                            node.state = 'Synced';
-                            node.metrics.wsrep_local_state_comment = 'Synced';
-                            node.metrics.wsrep_connected = 'ON';
-                            node.metrics.wsrep_ready = 'ON';
-                            addLog('OK', nodeId + ': Synced после Rejoin');
-                            toast('success', nodeId + ': Synced ✓');
-                            renderAll();
-                        }
-                    }, 2000);
+                    if (_dataMode === 'real') {
+                        var apiBase = (document.getElementById('apiUrl') ? document.getElementById('apiUrl').value.replace(/\/+$/, '') : 'http://localhost:8000');
+                        fetch(apiBase + '/api/rejoin', {
+                            method: 'POST',
+                            headers: { 'Content-Type': 'application/json' },
+                            body: JSON.stringify({ node_id: nodeId, method: method })
+                        })
+                        .then(function(r) { return r.json(); })
+                        .then(function(res) {
+                            addLog(res.ok ? 'OK' : 'ERROR', nodeId + ': Rejoin → ' + (res.stdout || res.error || 'done'));
+                            toast(res.ok ? 'success' : 'error', nodeId + ': Rejoin ' + (res.ok ? 'успешен ✓' : 'ошибка ✗'));
+                            setTimeout(fetchRealData, 2000);
+                        })
+                        .catch(function(e) { toast('error', 'Rejoin failed: ' + e.message); });
+                    } else {
+                        setTimeout(function() {
+                            var node = clusterData.nodes.find(function(n) { return n.id === nodeId; });
+                            if (node) {
+                                node.state = 'Synced';
+                                node.metrics.wsrep_local_state_comment = 'Synced';
+                                node.metrics.wsrep_connected = 'ON';
+                                node.metrics.wsrep_ready = 'ON';
+                                addLog('OK', nodeId + ': Synced после Rejoin');
+                                toast('success', nodeId + ': Synced ✓');
+                                renderAll();
+                            }
+                        }, 2000);
+                    }
                 });
             },
 
@@ -2078,7 +2150,6 @@
                 _dataMode = mode;
                 // Очищаем данные — mock-ноды НЕ должны торчать в Real режиме
                 clusterData = { nodes: [], timestamp: null };
-                _tickCount = 0;
                 _lastUpdateStr = '—';
                 var lu0 = document.getElementById('lastUpdateTime');
                 if (lu0) lu0.textContent = '—';
@@ -2094,18 +2165,56 @@
                 }
                 addLog('INFO', 'Режим данных переключён: ' + (mode === 'mock' ? 'Mock (симуляция)' : 'Real (backend API)'));
                 toast(mode === 'real' ? 'info' : 'success', 'Режим: ' + (mode === 'mock' ? 'Mock' : 'Real'));
-                renderAll();
+                // Сохраняем режим в nodes.yaml через backend
+                var apiBase = (document.getElementById('apiUrl') ? document.getElementById('apiUrl').value.replace(/\/+$/, '') : 'http://localhost:8000');
+                fetch(apiBase + '/api/config/mode', {
+                    method: 'POST',
+                    headers: { 'Content-Type': 'application/json' },
+                    body: JSON.stringify({ use_mock: mode === 'mock' })
+                }).catch(function(){});
+                // Немедленно загружаем данные нужного режима
+                if (mode === 'real') {
+                    fetchRealData();
+                } else {
+                    renderAll();
+                }
             },
 
             reloadYaml: function() {
-                renderYamlPreview();
-                addLog('INFO', 'nodes.yaml перечитан (симуляция).');
-                toast('success', 'nodes.yaml перезагружен');
+                var apiBase = (document.getElementById('apiUrl') ? document.getElementById('apiUrl').value.replace(/\/+$/, '') : 'http://localhost:8000');
+                fetch(apiBase + '/api/reload', { method: 'POST' })
+                    .then(function(r) { return r.json(); })
+                    .then(function() {
+                        renderYamlPreview();
+                        addLog('INFO', 'nodes.yaml перечитан с диска');
+                        toast('success', 'nodes.yaml перезагружен');
+                        if (_dataMode === 'real') fetchRealData();
+                    })
+                    .catch(function(e) {
+                        renderYamlPreview();
+                        addLog('WARN', 'Reload failed (API недоступен): ' + e.message);
+                        toast('warning', 'Reload: API недоступен');
+                    });
             },
 
             saveDbConfig: function() {
-                toast('success', 'Конфиг БД сохранён');
-                addLog('INFO', 'Конфигурация подключения обновлена.');
+                var dbUser = document.getElementById('dbUser')     ? document.getElementById('dbUser').value.trim()     : '';
+                var dbPass = document.getElementById('dbPassword') ? document.getElementById('dbPassword').value        : '';
+                var apiBase = (document.getElementById('apiUrl') ? document.getElementById('apiUrl').value.replace(/\/+$/, '') : 'http://localhost:8000');
+                fetch(apiBase + '/api/prefs', {
+                    method: 'POST',
+                    headers: { 'Content-Type': 'application/json' },
+                    body: JSON.stringify({ db_user: dbUser, db_password: dbPass })
+                })
+                .then(function(r) { return r.json(); })
+                .then(function() {
+                    toast('success', 'Конфиг БД сохранён в nodes.yaml');
+                    addLog('INFO', 'Конфигурация подключения обновлена.');
+                })
+                .catch(function(e) {
+                    toast('warning', 'Сохранено локально (API недоступен)');
+                    addLog('WARN', 'saveDbConfig API error: ' + e.message);
+                });
             },
 
             openAddNodeModal: function() {
@@ -2121,14 +2230,16 @@
             },
 
             confirmAddNode: function() {
-                var name = document.getElementById('newNodeName').value.trim();
-                var host = document.getElementById('newNodeHost').value.trim();
-                var port = parseInt(document.getElementById('newNodePort').value) || 3306;
-                var ssh  = parseInt(document.getElementById('newNodeSsh').value)  || 22;
+                var name    = document.getElementById('newNodeName').value.trim();
+                var host    = document.getElementById('newNodeHost').value.trim();
+                var port    = parseInt(document.getElementById('newNodePort').value) || 3306;
+                var ssh     = parseInt(document.getElementById('newNodeSsh').value)  || 22;
+                var sshUser = document.getElementById('newNodeSshUser') ? document.getElementById('newNodeSshUser').value.trim() : 'root';
+                var sshKey  = document.getElementById('newNodeSshKey')  ? document.getElementById('newNodeSshKey').value.trim()  : '~/.ssh/id_rsa';
                 if (!name || !host) { toast('error', 'Заполните Имя и IP-адрес'); return; }
                 var exists = clusterData.nodes.find(function(n) { return n.id === name || n.name === name; });
                 if (exists) { toast('error', 'Нода с таким именем уже существует'); return; }
-                clusterData.nodes.push({
+                var newNode = {
                     id: name, name: name, host: host, port: port, ssh: ssh, role: 'node', state: 'Offline',
                     metrics: {
                         wsrep_cluster_status: 'Disconnected', wsrep_cluster_size: '0',
@@ -2136,13 +2247,33 @@
                         wsrep_local_state_comment: 'Disconnected',
                         wsrep_local_recv_queue: '0', wsrep_local_send_queue: '0',
                         wsrep_flow_control_paused: '0.000', wsrep_cert_deps_distance: '0.00',
-                        wsrep_last_committed: '0', wsrep_replicated_bytes: '0', wsrep_received_bytes: '0'
+                        wsrep_last_committed: '0', wsrep_local_cert_failures: '0',
+                        wsrep_bf_aborts: '0', wsrep_cluster_conf_id: '0',
+                        wsrep_cluster_state_uuid: '—', wsrep_replicated_bytes: '—', wsrep_received_bytes: '—'
                     }
+                };
+                var apiBase = (document.getElementById('apiUrl') ? document.getElementById('apiUrl').value.replace(/\/+$/, '') : 'http://localhost:8000');
+                fetch(apiBase + '/api/config/node', {
+                    method: 'POST',
+                    headers: { 'Content-Type': 'application/json' },
+                    body: JSON.stringify({ id: name, name: name, host: host, port: port, ssh_port: ssh, ssh_user: sshUser, ssh_key: sshKey })
+                })
+                .then(function(r) { return r.json(); })
+                .then(function() {
+                    clusterData.nodes.push(newNode);
+                    App.closeModal('addNodeModal');
+                    renderAll();
+                    addLog('INFO', 'Нода добавлена в nodes.yaml: ' + name + ' (' + host + ')');
+                    toast('success', 'Нода ' + name + ' добавлена');
+                })
+                .catch(function(e) {
+                    // Fallback: добавляем только в память
+                    clusterData.nodes.push(newNode);
+                    App.closeModal('addNodeModal');
+                    renderAll();
+                    addLog('WARN', 'Нода добавлена (API недоступен): ' + name + ' — ' + e.message);
+                    toast('success', 'Нода ' + name + ' добавлена (offline режим)');
                 });
-                App.closeModal('addNodeModal');
-                renderAll();
-                addLog('INFO', 'Нода добавлена: ' + name + ' (' + host + ')');
-                toast('success', 'Нода ' + name + ' добавлена');
             },
 
             editNode: function(nodeId) {
@@ -2151,12 +2282,24 @@
 
             removeNode: function(nodeId) {
                 confirm('🗑️', 'Удалить ноду ' + nodeId + '?',
-                    'Нода будет удалена из мониторинга. Galera кластер не затрагивается.', 'btn-danger').then(function(ok) {
+                    'Нода будет удалена из мониторинга и nodes.yaml. Galera кластер не затрагивается.', 'btn-danger').then(function(ok) {
                     if (!ok) return;
-                    clusterData.nodes = clusterData.nodes.filter(function(n) { return n.id !== nodeId; });
-                    renderAll();
-                    addLog('WARN', 'Нода удалена из конфига: ' + nodeId);
-                    toast('warning', 'Нода ' + nodeId + ' удалена');
+                    var apiBase = (document.getElementById('apiUrl') ? document.getElementById('apiUrl').value.replace(/\/+$/, '') : 'http://localhost:8000');
+                    fetch(apiBase + '/api/config/node/' + nodeId, { method: 'DELETE' })
+                        .then(function(r) { return r.json(); })
+                        .then(function() {
+                            clusterData.nodes = clusterData.nodes.filter(function(n) { return n.id !== nodeId; });
+                            renderAll();
+                            addLog('WARN', 'Нода удалена из nodes.yaml: ' + nodeId);
+                            toast('warning', 'Нода ' + nodeId + ' удалена');
+                        })
+                        .catch(function(e) {
+                            // Fallback: удаляем только из памяти если API недоступен
+                            clusterData.nodes = clusterData.nodes.filter(function(n) { return n.id !== nodeId; });
+                            renderAll();
+                            addLog('WARN', 'Нода удалена (API недоступен): ' + nodeId + ' — ' + e.message);
+                            toast('warning', 'Нода ' + nodeId + ' удалена (offline режим)');
+                        });
                 });
             },
 
@@ -2169,23 +2312,52 @@
             confirmAddArbitrator: function() {
                 var host    = document.getElementById('arbHost').value.trim();
                 var ssh     = parseInt(document.getElementById('arbSsh').value) || 22;
-                var cluster = document.getElementById('arbCluster').value.trim();
-                var gcomm   = document.getElementById('arbGcomm').value.trim();
+                var sshUser = document.getElementById('arbSshUser') ? document.getElementById('arbSshUser').value.trim() : 'root';
+                var sshKey  = document.getElementById('arbSshKey')  ? document.getElementById('arbSshKey').value.trim()  : '~/.ssh/id_rsa';
+                var cluster = document.getElementById('arbCluster') ? document.getElementById('arbCluster').value.trim() : '';
+                var gcomm   = document.getElementById('arbGcomm')   ? document.getElementById('arbGcomm').value.trim()   : '';
                 if (!host) { toast('error', 'Укажите IP арбитра'); return; }
-                clusterData.arbitrator = { host: host, ssh: ssh, cluster: cluster, gcomm: gcomm };
-                App.closeModal('addArbitratorModal');
-                renderAll();
-                addLog('INFO', 'Арбитр добавлен: ' + host);
-                toast('success', 'Арбитр garbd добавлен');
+                var apiBase = (document.getElementById('apiUrl') ? document.getElementById('apiUrl').value.replace(/\/+$/, '') : 'http://localhost:8000');
+                fetch(apiBase + '/api/config/arbitrator', {
+                    method: 'POST',
+                    headers: { 'Content-Type': 'application/json' },
+                    body: JSON.stringify({ host: host, ssh_port: ssh, ssh_user: sshUser, ssh_key: sshKey })
+                })
+                .then(function(r) { return r.json(); })
+                .then(function() {
+                    clusterData.arbitrator = { host: host, ssh: ssh, cluster: cluster, gcomm: gcomm, enabled: true };
+                    App.closeModal('addArbitratorModal');
+                    renderAll();
+                    addLog('INFO', 'Арбитр сохранён в nodes.yaml: ' + host);
+                    toast('success', 'Арбитр garbd добавлен');
+                })
+                .catch(function(e) {
+                    clusterData.arbitrator = { host: host, ssh: ssh, cluster: cluster, gcomm: gcomm, enabled: true };
+                    App.closeModal('addArbitratorModal');
+                    renderAll();
+                    addLog('WARN', 'Арбитр добавлен (API недоступен): ' + e.message);
+                    toast('success', 'Арбитр garbd добавлен (offline режим)');
+                });
             },
 
             removeArbitrator: function() {
-                confirm('🗑️', 'Удалить арбитр?', 'garbd будет удалён из конфигурации.', 'btn-danger').then(function(ok) {
+                confirm('🗑️', 'Удалить арбитр?', 'garbd будет удалён из nodes.yaml.', 'btn-danger').then(function(ok) {
                     if (!ok) return;
-                    clusterData.arbitrator = null;
-                    renderAll();
-                    addLog('WARN', 'Арбитр удалён из конфига.');
-                    toast('warning', 'Арбитр удалён');
+                    var apiBase = (document.getElementById('apiUrl') ? document.getElementById('apiUrl').value.replace(/\/+$/, '') : 'http://localhost:8000');
+                    fetch(apiBase + '/api/config/arbitrator', { method: 'DELETE' })
+                        .then(function(r) { return r.json(); })
+                        .then(function() {
+                            clusterData.arbitrator = null;
+                            renderAll();
+                            addLog('WARN', 'Арбитр удалён из nodes.yaml');
+                            toast('warning', 'Арбитр удалён');
+                        })
+                        .catch(function(e) {
+                            clusterData.arbitrator = null;
+                            renderAll();
+                            addLog('WARN', 'Арбитр удалён (API недоступен): ' + e.message);
+                            toast('warning', 'Арбитр удалён (offline режим)');
+                        });
                 });
             },
 
@@ -2219,6 +2391,7 @@
             _pollTimer = setInterval(function() {
                 if (_dataMode === 'mock') {
                     clusterData.nodes.forEach(function(n) {
+                        if (!n || !n.metrics) return; // страховка
                         if (n.state === 'Synced') {
                             var base = parseInt(n.metrics.wsrep_last_committed) + Math.floor(Math.random()*4);
                             n.metrics.wsrep_last_committed = base.toString();
@@ -2227,7 +2400,7 @@
                     clusterData.timestamp = new Date();
                     _lastUpdateStr = clusterData.timestamp.toLocaleTimeString('ru-RU');
                     _tickCount++;
-                    if (_tickCount % 3 === 0) {
+                    if (_tickCount === 1 || _tickCount % 5 === 0) {
                         var _syn = clusterData.nodes.filter(function(n){ return n.state === 'Synced'; }).length;
                         addLog('INFO', '[Mock] Poll #' + _tickCount + ' — ' + _syn + '/' + clusterData.nodes.length + ' Synced');
                     }
@@ -2246,12 +2419,34 @@
                 .then(function(data) {
                     if (data && data.nodes && data.nodes.length > 0) {
                         clusterData.nodes = data.nodes.map(function(nd) {
+                            // Backend returns flat objects — map to {state, metrics}
+                            var state = nd.wsrep_local_state_comment
+                                || (nd.online === false ? 'Offline' : 'Unknown');
                             return {
-                                id:      nd.id || nd.name,
-                                name:    nd.name || nd.id,
-                                host:    nd.host || '',
-                                state:   nd.state || 'Unknown',
-                                metrics: nd.metrics || {}
+                                id:     nd.id || nd.name,
+                                name:   nd.name || nd.id,
+                                host:   nd.host || '',
+                                online: nd.online !== false,
+                                error:  nd.error || null,
+                                state:  state,
+                                metrics: {
+                                    wsrep_cluster_status:       nd.wsrep_cluster_status      || '—',
+                                    wsrep_cluster_size:         String(nd.wsrep_cluster_size || '0'),
+                                    wsrep_connected:            nd.wsrep_connected           || 'OFF',
+                                    wsrep_ready:                nd.wsrep_ready               || 'OFF',
+                                    wsrep_local_state_comment:  state,
+                                    wsrep_local_recv_queue:     String(nd.wsrep_local_recv_queue  || '0'),
+                                    wsrep_local_send_queue:     String(nd.wsrep_local_send_queue  || '0'),
+                                    wsrep_flow_control_paused:  String(nd.wsrep_flow_control_paused || '0.000'),
+                                    wsrep_cert_deps_distance:   String(nd.wsrep_cert_deps_distance || '0.00'),
+                                    wsrep_last_committed:       String(nd.wsrep_local_commits      || '0'),
+                                    wsrep_local_cert_failures:  String(nd.wsrep_local_cert_failures|| '0'),
+                                    wsrep_bf_aborts:            String(nd.wsrep_bf_aborts          || '0'),
+                                    wsrep_cluster_conf_id:      String(nd.wsrep_cluster_conf_id    || '0'),
+                                    wsrep_cluster_state_uuid:   nd.wsrep_cluster_state_uuid || '—',
+                                    wsrep_replicated_bytes:     nd.wsrep_replicated_bytes   || '—',
+                                    wsrep_received_bytes:       nd.wsrep_received_bytes     || '—',
+                                }
                             };
                         });
                         clusterData.timestamp = new Date();
@@ -2270,6 +2465,39 @@
                     addLog('WARN', 'API недоступен: ' + e.message);
                 });
         }
+
+        // При загрузке — спросить backend какой режим сохранён
+        (function initFromBackend() {
+            var apiBase = (document.getElementById('apiUrl') ? document.getElementById('apiUrl').value.replace(/\/+$/, '') : 'http://localhost:8000');
+            fetch(apiBase + '/api/config/mode')
+                .then(function(r) { return r.json(); })
+                .then(function(data) {
+                    var savedMode = data.mode || 'mock'; // 'mock' | 'real'
+                    if (savedMode !== _dataMode) {
+                        _dataMode = savedMode;
+                        // Обновляем кнопки и подсказку без вызова setDataMode (чтобы не писать обратно)
+                        var btnMock = document.getElementById('btnMock');
+                        var btnReal = document.getElementById('btnReal');
+                        var hint    = document.getElementById('dataModeHint');
+                        if (btnMock) btnMock.className = savedMode === 'mock' ? 'btn btn-primary' : 'btn btn-ghost';
+                        if (btnReal) btnReal.className = savedMode === 'real' ? 'btn btn-primary' : 'btn btn-ghost';
+                        if (hint) {
+                            hint.textContent = savedMode === 'mock'
+                                ? 'Сейчас: симуляция — данные генерируются локально в браузере'
+                                : 'Сейчас: Real — данные запрашиваются с backend API (localhost:8000)';
+                        }
+                        if (savedMode === 'real') {
+                            // Очищаем mock-данные и загружаем реальные
+                            clusterData = { nodes: [], timestamp: null };
+                            addLog('INFO', 'Режим восстановлен: Real (из nodes.yaml)');
+                            fetchRealData();
+                        }
+                    }
+                })
+                .catch(function() {
+                    // backend недоступен — остаёмся в mock
+                });
+        })();
 
         startAutoRefresh();
 

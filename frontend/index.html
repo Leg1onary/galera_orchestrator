@@ -121,7 +121,7 @@
         html { font-size: 16px; -webkit-font-smoothing: antialiased; }
         body {
             font-family: var(--font-body);
-            font-size: var(--text-base);
+            font-size: var(--text-base); /* ~17px */
             color: var(--text);
             background: var(--bg);
             min-height: 100dvh;
@@ -242,7 +242,7 @@
             display: flex;
             align-items: center;
             gap: var(--space-3);
-            padding: var(--space-3) var(--space-3);
+            padding: var(--space-3) var(--space-4);
             border-radius: var(--radius-md);
             font-size: var(--text-sm);
             font-weight: 500;
@@ -264,7 +264,7 @@
         /* ---- MAIN CONTENT ---- */
         .app-main {
             overflow-y: auto;
-            padding: var(--space-8);
+            padding: var(--space-10);
             background: var(--bg);
         }
 
@@ -322,7 +322,7 @@
             background: var(--surface);
             border: 1px solid var(--border);
             border-radius: var(--radius-lg);
-            padding: var(--space-6);
+            padding: var(--space-8);
             box-shadow: var(--shadow-sm);
         }
         .card-title {
@@ -346,11 +346,11 @@
             background: var(--surface);
             border: 1px solid var(--border);
             border-radius: var(--radius-lg);
-            padding: var(--space-5) var(--space-6);
+            padding: var(--space-6) var(--space-8);
             box-shadow: var(--shadow-sm);
         }
         .kpi-label {
-            font-size: var(--text-xs);
+            font-size: var(--text-sm);
             font-weight: 600;
             text-transform: uppercase;
             letter-spacing: 0.07em;
@@ -430,7 +430,7 @@
         .metric-row {
             background: var(--surface-2);
             border-radius: var(--radius-md);
-            padding: var(--space-3) var(--space-4);
+            padding: var(--space-4) var(--space-5);
         }
         .metric-key {
             font-size: var(--text-xs);
@@ -806,29 +806,35 @@
 
         <div class="header-spacer"></div>
 
-        <div class="cluster-badge" id="headerStatus">
-            <span class="status-dot ok" id="headerDot"></span>
-            <span id="headerStatusText">TEST · Primary · 2/2</span>
-        </div>
-
-        <div style="display:flex;align-items:center;gap:var(--space-2);margin-left:var(--space-4)">
-            <span style="font-size:var(--text-xs);font-weight:600;text-transform:uppercase;letter-spacing:.07em;color:var(--text-muted);white-space:nowrap">Опрос</span>
-            <select class="form-input" id="pollIntervalSelect" style="width:88px;height:32px;font-size:var(--text-xs);padding:0 var(--space-2)" onchange="App.setPollInterval(this.value)">
-                <option value="2">2 сек</option>
-                <option value="5" selected>5 сек</option>
-                <option value="10">10 сек</option>
-                <option value="30">30 сек</option>
-                <option value="60">60 сек</option>
-            </select>
-            <button class="btn btn-ghost btn-sm" onclick="App.refreshAll()" title="Обновить метрики" style="height:32px;padding:0 var(--space-3);white-space:nowrap">
-                <svg width="14" height="14" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2.2"><polyline points="23 4 23 10 17 10"/><path d="M20.49 15a9 9 0 1 1-.02-8.49"/></svg>
-                Обновить
-            </button>
-        </div>
-
-        <div id="lastUpdateBadge" style="display:flex;align-items:center;gap:var(--space-1);margin-left:var(--space-3);font-size:var(--text-xs);color:var(--text-muted);white-space:nowrap">
-            <svg width="12" height="12" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2"><circle cx="12" cy="12" r="10"/><polyline points="12 6 12 12 16 14"/></svg>
-            <span id="lastUpdateText">—</span>
+        <div style="display:flex;align-items:center;gap:var(--space-3);flex-wrap:wrap">
+            <div class="cluster-badge" id="headerStatus">
+                <span class="status-dot ok" id="headerDot"></span>
+                <span id="headerStatusText">TEST · Primary · 2/2</span>
+            </div>
+            <div style="display:flex;align-items:center;gap:var(--space-2);padding-left:var(--space-3);border-left:1px solid rgba(255,255,255,0.12)">
+                <span style="font-size:0.72rem;color:var(--color-text-muted);white-space:nowrap">Опрос:</span>
+                <select class="form-input" id="pollIntervalSelect"
+                        style="width:76px;padding:2px 6px;font-size:0.72rem;height:28px"
+                        onchange="App.setPollInterval(this.value)">
+                    <option value="2">2 сек</option>
+                    <option value="5" selected>5 сек</option>
+                    <option value="10">10 сек</option>
+                    <option value="30">30 сек</option>
+                    <option value="60">60 сек</option>
+                </select>
+                <button class="btn btn-ghost"
+                        style="padding:2px 10px;font-size:0.72rem;height:28px;display:flex;align-items:center;gap:4px"
+                        onclick="App.refreshAll()" title="Обновить сейчас">
+                    <svg width="12" height="12" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2.5">
+                        <polyline points="23 4 23 10 17 10"/>
+                        <path d="M20.49 15a9 9 0 1 1-.02-8.49"/>
+                    </svg>
+                    Обновить
+                </button>
+                <span style="font-size:0.72rem;color:var(--color-text-muted);white-space:nowrap">
+                    Обновлено:&nbsp;<span id="lastUpdateTime" style="color:var(--color-text)">—</span>
+                </span>
+            </div>
         </div>
 
         <button class="theme-btn" id="themeToggle" title="Переключить тему" aria-label="Переключить тему">
@@ -891,6 +897,7 @@
                             <option value="flow_control">🟡 Flow Control Active</option>
                         </select>
                     </div>
+
                 </div>
             </div>
 
@@ -1165,7 +1172,13 @@
                     </div>
                     <div class="form-group">
                         <label class="form-label">Частота опроса <span>секунды</span></label>
-                        <p class="form-hint" style="margin-top:var(--space-1)">Управляется из шапки страницы (выпадающий список «Опрос»)</p>
+                        <select class="form-input" id="pollInterval" onchange="App.setPollInterval(this.value)">
+                            <option value="2">2 сек</option>
+                            <option value="5" selected>5 сек</option>
+                            <option value="10">10 сек</option>
+                            <option value="30">30 сек</option>
+                            <option value="60">60 сек</option>
+                        </select>
                     </div>
                 </div>
                 <div class="form-group">
@@ -1586,7 +1599,7 @@
             var grid = document.getElementById('kpiGrid');
             if (!grid) return;
             if (!clusterData.nodes || clusterData.nodes.length === 0) {
-                grid.innerHTML = '<div class="kpi-card" style="grid-column:1/-1;text-align:center;color:var(--text-muted);padding:var(--space-8)">Нет нод в мониторинге</div>';
+                grid.innerHTML = '<div class="kpi-card" style="grid-column:1/-1;text-align:center;color:var(--color-text-muted);padding:2rem">Нет нод в мониторинге</div>';
                 return;
             }
             var activeNodes = clusterData.nodes.filter(function(n) { return n && n.metrics; });
@@ -1624,6 +1637,10 @@
         function renderNodesGrid() {
             var grid = document.getElementById('nodesGrid');
             if (!grid) return;
+            if (!clusterData.nodes || clusterData.nodes.length === 0) {
+                grid.innerHTML = '<div style="padding:2rem;color:var(--color-text-muted)">Нет нод в мониторинге</div>';
+                return;
+            }
             grid.innerHTML = clusterData.nodes.map(function(node) {
                 return nodeCardHtml(node);
             }).join('');
@@ -1697,8 +1714,8 @@
         // ---- TOPOLOGY ----
         function renderTopology() {
             if (!clusterData.nodes || clusterData.nodes.length === 0) {
-                var tbl = document.getElementById('topoTable');
-                if (tbl) tbl.innerHTML = '<p style="padding:1rem;color:var(--text-muted)">Нет нод</p>';
+                var tbl0 = document.getElementById('topoTable');
+                if (tbl0) tbl0.innerHTML = '<p style="padding:1rem;color:var(--color-text-muted)">Нет нод в мониторинге</p>';
                 return;
             }
             var n0 = clusterData.nodes[0];
@@ -1717,7 +1734,7 @@
                 return 'var(--error-dim)';
             }
 
-            var lineOk = n0.state !== 'Offline' && n1.state !== 'Offline';
+            var lineOk = n1 ? (n0.state !== 'Offline' && n1.state !== 'Offline') : false;
             var lineEl = document.getElementById('topoLine');
             if (lineEl) {
                 lineEl.setAttribute('stroke', lineOk ? 'var(--success)' : 'var(--error)');
@@ -1741,45 +1758,56 @@
             var r2 = document.getElementById('topoN2Rect');
             var s2 = document.getElementById('topoN2State');
             var b2 = document.getElementById('topoN2Badge');
-            if (r2) r2.setAttribute('style', 'fill:var(--surface);stroke:' + svgColor(n1.state) + ';stroke-width:2');
-            if (s2) { s2.textContent = n1.state.toUpperCase(); s2.setAttribute('style', 'fill:' + svgColor(n1.state)); }
-            if (b2) b2.setAttribute('style', 'fill:' + svgBg(n1.state));
+            var n1s = n1 ? n1.state : 'Offline';
+            if (r2) r2.setAttribute('style', 'fill:var(--surface);stroke:' + svgColor(n1s) + ';stroke-width:2');
+            if (s2) { s2.textContent = n1s.toUpperCase(); s2.setAttribute('style', 'fill:' + svgColor(n1s)); }
+            if (b2) b2.setAttribute('style', 'fill:' + svgBg(n1s));
 
             // cluster size label
             var sz = document.getElementById('topoSizeLabel');
-            if (sz) {
-                sz.textContent = 'Cluster Size: ' + clusterData.nodes[0].metrics.wsrep_cluster_size +
-                    ' · Status: ' + clusterData.nodes[0].metrics.wsrep_cluster_status +
-                    ' · Cert Failures: 0';
+            if (sz && n0.metrics) {
+                sz.textContent = 'Cluster Size: ' + (n0.metrics.wsrep_cluster_size || '—') +
+                    ' · Status: ' + (n0.metrics.wsrep_cluster_status || '—') + ' · Cert Failures: 0';
             }
-
             // comparison table
             var tbl = document.getElementById('topoTable');
-            if (!tbl) return;
-            var keys = Object.keys(clusterData.nodes[0].metrics);
+            if (!tbl || !n0.metrics) return;
+            if (!n1 || !n1.metrics) {
+                var keys1 = Object.keys(n0.metrics);
+                var rows1 = keys1.map(function(k) {
+                    var v0 = n0.metrics[k]; var c0 = metricClass(k, v0);
+                    return '<tr><td class="mono">' + k + '</td><td class="' + c0 + '">' + v0 + '</td><td style="color:var(--color-text-muted)">—</td></tr>';
+                }).join('');
+                tbl.innerHTML = '<table><thead><tr><th>Переменная</th><th>' + n0.name + '</th><th>—</th></tr></thead><tbody>' + rows1 + '</tbody></table>';
+                return;
+            }
+            var keys = Object.keys(n0.metrics);
             var rows = keys.map(function(k) {
-                var v0 = clusterData.nodes[0].metrics[k];
-                var v1 = clusterData.nodes[1].metrics[k];
-                var c0 = metricClass(k, v0);
-                var c1 = metricClass(k, v1);
+                var v0 = n0.metrics[k]; var v1 = n1.metrics[k] !== undefined ? n1.metrics[k] : '—';
+                var c0 = metricClass(k, v0); var c1 = metricClass(k, v1);
                 return '<tr><td class="mono">' + k + '</td><td class="' + c0 + '">' + v0 + '</td><td class="' + c1 + '">' + v1 + '</td></tr>';
             }).join('');
-            tbl.innerHTML = '<table><thead><tr><th>Переменная</th><th>' + clusterData.nodes[0].name + '</th><th>' + clusterData.nodes[1].name + '</th></tr></thead><tbody>' + rows + '</tbody></table>';
+            tbl.innerHTML = '<table><thead><tr><th>Переменная</th><th>' + n0.name + '</th><th>' + n1.name + '</th></tr></thead><tbody>' + rows + '</tbody></table>';
         }
 
         // ---- HEADER STATUS ----
         function updateHeaderStatus() {
             var dot  = document.getElementById('headerDot');
             var text = document.getElementById('headerStatusText');
-            var n0   = clusterData.nodes[0].metrics;
+            if (!clusterData.nodes || clusterData.nodes.length === 0) {
+                if (dot)  dot.className = 'status-dot warn';
+                if (text) text.textContent = 'Нет нод';
+                return;
+            }
+            var activeN = clusterData.nodes.filter(function(n){ return n && n.metrics; });
+            if (!activeN.length) return;
+            var n0   = activeN[0].metrics;
             var ok   = n0.wsrep_cluster_status === 'Primary';
             var synced = clusterData.nodes.filter(function(n) { return n.state === 'Synced'; }).length;
-            if (dot) {
-                dot.className = 'status-dot ' + (ok ? 'ok' : 'error');
-            }
-            if (text) {
-                text.textContent = 'TEST · ' + n0.wsrep_cluster_status + ' · ' + synced + '/' + clusterData.nodes.length;
-            }
+            if (dot)  dot.className = 'status-dot ' + (ok ? 'ok' : 'error');
+            if (text) text.textContent = 'TEST · ' + (n0.wsrep_cluster_status || '—') + ' · ' + synced + '/' + clusterData.nodes.length;
+            var lu = document.getElementById('lastUpdateTime');
+            if (lu && _lastUpdateStr) lu.textContent = _lastUpdateStr;
         }
 
         // ---- BOOTSTRAP CANDIDATES ----
@@ -1922,13 +1950,7 @@
             },
 
             refreshAll: function() {
-                _lastUpdateTs = new Date();
-                updateLastUpdateBadge();
-                if (_dataMode === 'real') {
-                    fetchRealData();
-                } else {
-                    renderAll();
-                }
+                renderAll();
                 addLog('INFO', 'Метрики обновлены вручную.');
                 toast('success', 'Данные обновлены');
             },
@@ -2046,7 +2068,7 @@
                 startAutoRefresh();
                 addLog('INFO', 'Частота опроса изменена: ' + val + ' сек');
                 // синхронизируем оба селекта
-                ['pollIntervalSelect'].forEach(function(id) {
+                ['pollIntervalSelect', 'pollInterval'].forEach(function(id) {
                     var el = document.getElementById(id);
                     if (el) el.value = val;
                 });
@@ -2054,8 +2076,12 @@
 
             setDataMode: function(mode) {
                 _dataMode = mode;
+                // Очищаем данные — mock-ноды НЕ должны торчать в Real режиме
                 clusterData = { nodes: [], timestamp: null };
-                renderAll();
+                _tickCount = 0;
+                _lastUpdateStr = '—';
+                var lu0 = document.getElementById('lastUpdateTime');
+                if (lu0) lu0.textContent = '—';
                 var btnMock = document.getElementById('btnMock');
                 var btnReal = document.getElementById('btnReal');
                 var hint    = document.getElementById('dataModeHint');
@@ -2066,65 +2092,15 @@
                         ? 'Сейчас: симуляция — данные генерируются локально в браузере'
                         : 'Сейчас: Real — данные запрашиваются с backend API (localhost:8000)';
                 }
-                if (mode === 'real') {
-                    // Очищаем mock-значения, показываем «Connecting...»
-                    clusterData.nodes.forEach(function(n) {
-                        n.state = 'Joiner';
-                        n.metrics = {
-                            wsrep_cluster_status: '...', wsrep_cluster_size: '—',
-                            wsrep_connected: '—', wsrep_ready: '—',
-                            wsrep_local_state_comment: 'Connecting...',
-                            wsrep_local_recv_queue: '0', wsrep_local_send_queue: '0',
-                            wsrep_flow_control_paused: '0.000',
-                            wsrep_cert_deps_distance: '—',
-                            wsrep_last_committed: '—',
-                            wsrep_replicated_bytes: '—', wsrep_received_bytes: '—'
-                        };
-                    });
-                    renderAll();
-                    fetchRealData();
-                } else {
-                    // Восстанавливаем mock-данные при возврате в Mock
-                    clusterData.nodes.forEach(function(n) {
-                        n.state = 'Synced';
-                        n.metrics.wsrep_cluster_status = 'Primary';
-                        n.metrics.wsrep_cluster_size = String(clusterData.nodes.length);
-                        n.metrics.wsrep_connected = 'ON';
-                        n.metrics.wsrep_ready = 'ON';
-                        n.metrics.wsrep_local_state_comment = 'Synced';
-                        n.metrics.wsrep_flow_control_paused = '0.000';
-                        if (!n.metrics.wsrep_last_committed || n.metrics.wsrep_last_committed === '—') {
-                            n.metrics.wsrep_last_committed = '104521';
-                        }
-                    });
-                    renderAll();
-                }
                 addLog('INFO', 'Режим данных переключён: ' + (mode === 'mock' ? 'Mock (симуляция)' : 'Real (backend API)'));
                 toast(mode === 'real' ? 'info' : 'success', 'Режим: ' + (mode === 'mock' ? 'Mock' : 'Real'));
+                renderAll();
             },
 
             reloadYaml: function() {
-                var apiBase = (document.getElementById('apiUrl') ? document.getElementById('apiUrl').value.replace(/\/+$/, '') : 'http://localhost:8000');
-                fetch(apiBase + '/api/reload', { method: 'POST' })
-                    .then(function(r) { return r.json(); })
-                    .then(function(data) {
-                        // Если вернулись ноды — обновляем локальный стейт
-                        if (data && data.nodes) {
-                            data.nodes.forEach(function(nd) {
-                                var local = clusterData.nodes.find(function(n) { return n.id === nd.id; });
-                                if (local) { Object.assign(local, nd); }
-                            });
-                        }
-                        renderYamlPreview();
-                        renderAll();
-                        addLog('INFO', 'nodes.yaml перечитан с сервера.');
-                        toast('success', 'nodes.yaml перезагружен');
-                    })
-                    .catch(function(e) {
-                        renderYamlPreview();
-                        addLog('INFO', '[local] nodes.yaml перечитан (Mock: backend недоступен).');
-                        toast('success', 'nodes.yaml перезагружен (только UI)');
-                    });
+                renderYamlPreview();
+                addLog('INFO', 'nodes.yaml перечитан (симуляция).');
+                toast('success', 'nodes.yaml перезагружен');
             },
 
             saveDbConfig: function() {
@@ -2152,7 +2128,7 @@
                 if (!name || !host) { toast('error', 'Заполните Имя и IP-адрес'); return; }
                 var exists = clusterData.nodes.find(function(n) { return n.id === name || n.name === name; });
                 if (exists) { toast('error', 'Нода с таким именем уже существует'); return; }
-                var newNode = {
+                clusterData.nodes.push({
                     id: name, name: name, host: host, port: port, ssh: ssh, role: 'node', state: 'Offline',
                     metrics: {
                         wsrep_cluster_status: 'Disconnected', wsrep_cluster_size: '0',
@@ -2162,34 +2138,12 @@
                         wsrep_flow_control_paused: '0.000', wsrep_cert_deps_distance: '0.00',
                         wsrep_last_committed: '0', wsrep_replicated_bytes: '0', wsrep_received_bytes: '0'
                     }
-                };
-                var apiBase = (document.getElementById('apiUrl') ? document.getElementById('apiUrl').value.replace(/\/+$/, '') : 'http://localhost:8000');
-                fetch(apiBase + '/api/config/node', {
-                    method: 'POST',
-                    headers: { 'Content-Type': 'application/json' },
-                    body: JSON.stringify({ id: name, name: name, host: host, port: port, ssh_port: ssh })
-                })
-                    .then(function(r) {
-                        if (!r.ok) return r.json().then(function(e) { throw new Error(e.detail || r.status); });
-                        return r.json();
-                    })
-                    .then(function() {
-                        clusterData.nodes.push(newNode);
-                        App.closeModal('addNodeModal');
-                        renderAll();
-                        addLog('INFO', 'Нода добавлена в nodes.yaml: ' + name + ' (' + host + ')');
-                        toast('success', 'Нода ' + name + ' добавлена');
-                    })
-                    .catch(function(e) {
-                        // Fallback: только локально (Mock-режим)
-                        clusterData.nodes.push(newNode);
-                        App.closeModal('addNodeModal');
-                        renderAll();
-                        addLog('INFO', '[local] Нода добавлена локально: ' + name + ' (backend: ' + e.message + ')');
-                        toast('success', 'Нода ' + name + ' добавлена (только в UI)');
-                    });
+                });
+                App.closeModal('addNodeModal');
+                renderAll();
+                addLog('INFO', 'Нода добавлена: ' + name + ' (' + host + ')');
+                toast('success', 'Нода ' + name + ' добавлена');
             },
-
 
             editNode: function(nodeId) {
                 toast('info', 'Редактирование: откройте nodes.yaml для ручного изменения');
@@ -2199,25 +2153,10 @@
                 confirm('🗑️', 'Удалить ноду ' + nodeId + '?',
                     'Нода будет удалена из мониторинга. Galera кластер не затрагивается.', 'btn-danger').then(function(ok) {
                     if (!ok) return;
-                    var apiBase = (document.getElementById('apiUrl') ? document.getElementById('apiUrl').value.replace(/\/+$/, '') : 'http://localhost:8000');
-                    fetch(apiBase + '/api/config/node/' + encodeURIComponent(nodeId), { method: 'DELETE' })
-                        .then(function(r) {
-                            if (!r.ok) return r.json().then(function(e) { throw new Error(e.detail || r.status); });
-                            return r.json();
-                        })
-                        .then(function() {
-                            clusterData.nodes = clusterData.nodes.filter(function(n) { return n.id !== nodeId; });
-                            renderAll();
-                            addLog('WARN', 'Нода удалена из nodes.yaml: ' + nodeId);
-                            toast('warning', 'Нода ' + nodeId + ' удалена');
-                        })
-                        .catch(function(e) {
-                            // Если backend недоступен (Mock-режим) — удаляем только локально
-                            clusterData.nodes = clusterData.nodes.filter(function(n) { return n.id !== nodeId; });
-                            renderAll();
-                            addLog('WARN', '[local] Нода удалена локально: ' + nodeId + ' (backend: ' + e.message + ')');
-                            toast('warning', 'Нода ' + nodeId + ' удалена (только в UI)');
-                        });
+                    clusterData.nodes = clusterData.nodes.filter(function(n) { return n.id !== nodeId; });
+                    renderAll();
+                    addLog('WARN', 'Нода удалена из конфига: ' + nodeId);
+                    toast('warning', 'Нода ' + nodeId + ' удалена');
                 });
             },
 
@@ -2233,58 +2172,22 @@
                 var cluster = document.getElementById('arbCluster').value.trim();
                 var gcomm   = document.getElementById('arbGcomm').value.trim();
                 if (!host) { toast('error', 'Укажите IP арбитра'); return; }
-                var arbData = { host: host, ssh_port: ssh, cluster: cluster, gcomm: gcomm };
-                var apiBase = (document.getElementById('apiUrl') ? document.getElementById('apiUrl').value.replace(/\/+$/, '') : 'http://localhost:8000');
-                fetch(apiBase + '/api/config/arbitrator', {
-                    method: 'POST',
-                    headers: { 'Content-Type': 'application/json' },
-                    body: JSON.stringify(arbData)
-                })
-                    .then(function(r) {
-                        if (!r.ok) return r.json().then(function(e) { throw new Error(e.detail || r.status); });
-                        return r.json();
-                    })
-                    .then(function() {
-                        clusterData.arbitrator = { host: host, ssh: ssh, cluster: cluster, gcomm: gcomm };
-                        App.closeModal('addArbitratorModal');
-                        renderAll();
-                        addLog('INFO', 'Арбитр добавлен в nodes.yaml: ' + host);
-                        toast('success', 'Арбитр garbd добавлен');
-                    })
-                    .catch(function(e) {
-                        clusterData.arbitrator = { host: host, ssh: ssh, cluster: cluster, gcomm: gcomm };
-                        App.closeModal('addArbitratorModal');
-                        renderAll();
-                        addLog('INFO', '[local] Арбитр добавлен локально: ' + host + ' (backend: ' + e.message + ')');
-                        toast('success', 'Арбитр добавлен (только в UI)');
-                    });
+                clusterData.arbitrator = { host: host, ssh: ssh, cluster: cluster, gcomm: gcomm };
+                App.closeModal('addArbitratorModal');
+                renderAll();
+                addLog('INFO', 'Арбитр добавлен: ' + host);
+                toast('success', 'Арбитр garbd добавлен');
             },
-
 
             removeArbitrator: function() {
                 confirm('🗑️', 'Удалить арбитр?', 'garbd будет удалён из конфигурации.', 'btn-danger').then(function(ok) {
                     if (!ok) return;
-                    var apiBase = (document.getElementById('apiUrl') ? document.getElementById('apiUrl').value.replace(/\/+$/, '') : 'http://localhost:8000');
-                    fetch(apiBase + '/api/config/arbitrator', { method: 'DELETE' })
-                        .then(function(r) {
-                            if (!r.ok) return r.json().then(function(e) { throw new Error(e.detail || r.status); });
-                            return r.json();
-                        })
-                        .then(function() {
-                            clusterData.arbitrator = null;
-                            renderAll();
-                            addLog('WARN', 'Арбитр удалён из nodes.yaml.');
-                            toast('warning', 'Арбитр удалён');
-                        })
-                        .catch(function(e) {
-                            clusterData.arbitrator = null;
-                            renderAll();
-                            addLog('WARN', '[local] Арбитр удалён локально (backend: ' + e.message + ')');
-                            toast('warning', 'Арбитр удалён (только в UI)');
-                        });
+                    clusterData.arbitrator = null;
+                    renderAll();
+                    addLog('WARN', 'Арбитр удалён из конфига.');
+                    toast('warning', 'Арбитр удалён');
                 });
             },
-
 
             resolveConfirm: function() {
                 document.getElementById('confirmOverlay').classList.remove('open');
@@ -2308,31 +2211,26 @@
         var _pollIntervalMs = 5000;
         var _pollTimer = null;
         var _dataMode = 'mock'; // 'mock' | 'real'
-        var _lastUpdateTs = new Date();
-
-        function updateLastUpdateBadge() {
-            var el = document.getElementById('lastUpdateText');
-            if (!el) return;
-            el.textContent = 'Обновлено: ' + _lastUpdateTs.toTimeString().slice(0,8);
-        }
+        var _tickCount = 0;
+        var _lastUpdateStr = '—';
 
         function startAutoRefresh() {
             if (_pollTimer) clearInterval(_pollTimer);
             _pollTimer = setInterval(function() {
                 if (_dataMode === 'mock') {
-                    // симулируем tick транзакций
                     clusterData.nodes.forEach(function(n) {
                         if (n.state === 'Synced') {
                             var base = parseInt(n.metrics.wsrep_last_committed) + Math.floor(Math.random()*4);
                             n.metrics.wsrep_last_committed = base.toString();
-                            n.metrics.wsrep_local_recv_queue = Math.random() < 0.1 ? String(Math.floor(Math.random()*3)) : '0';
                         }
                     });
-                    var syncedCount = clusterData.nodes.filter(function(n){ return n.state === 'Synced'; }).length;
-                    var lc = clusterData.nodes.length > 0 ? clusterData.nodes[0].metrics.wsrep_last_committed : '—';
-                    addLog('INFO', '[mock] Tick: ' + syncedCount + '/' + clusterData.nodes.length + ' Synced · last_committed=' + lc);
-                    _lastUpdateTs = new Date();
-                    updateLastUpdateBadge();
+                    clusterData.timestamp = new Date();
+                    _lastUpdateStr = clusterData.timestamp.toLocaleTimeString('ru-RU');
+                    _tickCount++;
+                    if (_tickCount % 3 === 0) {
+                        var _syn = clusterData.nodes.filter(function(n){ return n.state === 'Synced'; }).length;
+                        addLog('INFO', '[Mock] Poll #' + _tickCount + ' — ' + _syn + '/' + clusterData.nodes.length + ' Synced');
+                    }
                     renderAll();
                 } else {
                     // Real mode — вызываем backend API
@@ -2342,26 +2240,34 @@
         }
 
         function fetchRealData() {
-            var apiBase = (document.getElementById('apiUrl') ? document.getElementById('apiUrl').value : 'http://localhost:8000');
+            var apiBase = (document.getElementById('apiUrl') ? document.getElementById('apiUrl').value.replace(/\/+$/, '') : 'http://localhost:8000');
             fetch(apiBase + '/api/status')
-                .then(function(r) { return r.json(); })
+                .then(function(r) { if (!r.ok) throw new Error('HTTP ' + r.status); return r.json(); })
                 .then(function(data) {
-                    if (data && data.nodes) {
-                        data.nodes.forEach(function(nd) {
-                            var local = clusterData.nodes.find(function(n) { return n.id === nd.id || n.name === nd.name; });
-                            if (local && nd.metrics) {
-                                Object.assign(local.metrics, nd.metrics);
-                                if (nd.state) local.state = nd.state;
-                            }
+                    if (data && data.nodes && data.nodes.length > 0) {
+                        clusterData.nodes = data.nodes.map(function(nd) {
+                            return {
+                                id:      nd.id || nd.name,
+                                name:    nd.name || nd.id,
+                                host:    nd.host || '',
+                                state:   nd.state || 'Unknown',
+                                metrics: nd.metrics || {}
+                            };
                         });
-                        _lastUpdateTs = new Date();
-                        updateLastUpdateBadge();
-                        addLog('INFO', '[real] Данные получены с backend API');
+                        clusterData.timestamp = new Date();
+                        _lastUpdateStr = clusterData.timestamp.toLocaleTimeString('ru-RU');
+                        _tickCount++;
+                        if (_tickCount % 3 === 0 || _tickCount === 1) {
+                            var _syn = clusterData.nodes.filter(function(n){ return n.state === 'Synced'; }).length;
+                            addLog('INFO', '[Real] Poll #' + _tickCount + ' — ' + _syn + '/' + clusterData.nodes.length + ' Synced');
+                        }
                         renderAll();
+                    } else {
+                        addLog('WARN', '[Real] /api/status вернул пустой список нод');
                     }
                 })
                 .catch(function(e) {
-                    addLog('WARN', 'API недоступен: ' + e.message + ' — переключитесь в Mock');
+                    addLog('WARN', 'API недоступен: ' + e.message);
                 });
         }
 

@@ -393,8 +393,8 @@ async def get_seqno():
             })
         except Exception as e:
             results.append({"id": nid, "name": node.get("name", nid), "host": node.get("host",""),
-                             "reachable": False, "error": str(e), "seqno": -1,
-                             "safe_to_bootstrap": 0, "uuid": "unknown"})
+                            "reachable": False, "error": str(e), "seqno": -1,
+                            "safe_to_bootstrap": 0, "uuid": "unknown"})
 
     candidate = max((r for r in results if r["reachable"]), key=lambda x: x["seqno"], default=None)
     return {
@@ -489,7 +489,7 @@ async def do_rejoin(payload: RejoinPayload):
         steps = [
             {"step":1,"status":"ok","message":f"SSH → {payload.node_id}: systemctl stop mariadb.service"},
             {"step":2,"status":"ok","message":f"Метод: {payload.method.upper()} — "
-             + ("инкрементальная синхронизация (быстро)" if payload.method=="ist" else "полный SST snapshot (долго)")},
+                                              + ("инкрементальная синхронизация (быстро)" if payload.method=="ist" else "полный SST snapshot (долго)")},
             {"step":3,"status":"ok","message":f"systemctl start mariadb.service → MariaDB запущена"},
             {"step":4,"status":"ok","message":f"{payload.node_id}: wsrep_local_state_comment = Joined"},
             {"step":5,"status":"done","message":f"{payload.node_id}: wsrep_local_state_comment = Synced ✓"},

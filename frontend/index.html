@@ -2170,6 +2170,31 @@
 
                 </div>
             </div>
+            <!-- D2: INNODB STATUS -->
+            <div class="card" style="margin-bottom:var(--space-6)">
+                <div class="card-header">
+                    <div class="card-title">
+                        <svg width="16" height="16" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2"><ellipse cx="12" cy="5" rx="9" ry="3"/><path d="M21 12c0 1.66-4 3-9 3s-9-1.34-9-3"/><path d="M3 5v14c0 1.66 4 3 9 3s9-1.34 9-3V5"/></svg>
+                        InnoDB Status — диагностика дедлоков
+                    </div>
+                    <div style="display:flex;gap:var(--space-2);align-items:center">
+                        <select id="innodbNodeSelect" class="form-input" style="height:32px;font-size:var(--text-sm);width:160px" onchange="Diag.innodbNodeChanged()">
+                            <option value="">— выберите ноду —</option>
+                        </select>
+                        <button class="btn btn-primary btn-sm" id="btnInnodbStatus" onclick="Diag.fetchInnodbStatus()" disabled>
+                            <svg width="13" height="13" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2.5"><polyline points="23 4 23 10 17 10"/><path d="M20.49 15a9 9 0 1 1-.02-8.49"/></svg>
+                            Получить статус
+                        </button>
+                    </div>
+                </div>
+                <div id="innodbContainer">
+                    <div style="padding:var(--space-6);text-align:center;color:var(--color-text-muted);font-size:var(--text-sm)">
+                        Выберите ноду и нажмите «Получить статус» для запуска <code>SHOW ENGINE INNODB STATUS</code>
+                    </div>
+                </div>
+            </div>
+
+
 
         </section>
 
@@ -3588,7 +3613,7 @@
                 event.currentTarget.classList.add('active');
                 renderAll();
                 if (page === 'diagnostics') {
-                    setTimeout(function() { Diag.init(); }, 50);
+                    setTimeout(function() { Diag.init(); InnodbStatus.init(); }, 50);
                 }
             },
 
@@ -5339,8 +5364,180 @@
                 + '</tr></thead>'
                 + '<tbody>' + rows + '</tbody>'
                 + '</table></div>';
+        },
+
+        innodbNodeChanged: function() { window.InnodbStatus.nodeChanged(); },
+        fetchInnodbStatus: function() { window.InnodbStatus.fetch(); }
+    };
+
+
+    // ──────────────────────────────────────────────────────────────
+    // D2: INNODB STATUS
+    // ──────────────────────────────────────────────────────────────
+    var InnodbStatus = {
+        init: function() {
+            var sel = document.getElementById('innodbNodeSelect');
+            if (!sel) return;
+            // Populate node list
+            sel.innerHTML = '<option value="">— выберите ноду —</option>';
+            clusterData.nodes.forEach(function(n) {
+                var opt = document.createElement('option');
+                opt.value = n.id || n.name;
+                opt.textContent = n.name;
+                sel.appendChild(opt);
+            });
+        },
+        nodeChanged: function() {
+            var sel = document.getElementById('innodbNodeSelect');
+            var btn = document.getElementById('btnInnodbStatus');
+            if (btn) btn.disabled = !sel || !sel.value;
+        },
+        fetch: function() {
+            var sel = document.getElementById('innodbNodeSelect');
+            if (!sel || !sel.value) return;
+            var nodeId = sel.value;
+            var container = document.getElementById('innodbContainer');
+            if (!container) return;
+            container.innerHTML = '<div style="padding:var(--space-6);text-align:center;color:var(--color-text-muted)">'
+                + '<span class="status-dot" style="background:var(--color-warning);display:inline-block;width:8px;height:8px;border-radius:50%;margin-right:8px"></span>'
+                + 'Выполняется SHOW ENGINE INNODB STATUS...</div>';
+
+            var url = (typeof APP_CONFIG !== 'undefined' && APP_CONFIG.API_BASE)
+                ? APP_CONFIG.API_BASE + '/api/node/' + encodeURIComponent(nodeId) + '/innodb-status'
+                : '/api/node/' + encodeURIComponent(nodeId) + '/innodb-status';
+
+            fetch(url)
+                .then(function(r) { return r.json(); })
+                .then(function(data) { InnodbStatus.render(data, nodeId); })
+                .catch(function(e) {
+                    container.innerHTML = '<div style="padding:var(--space-4);color:var(--color-error)">'
+                        + '⚠ Ошибка: ' + e.message + '</div>';
+                });
+        },
+        render: function(data, nodeId) {
+            var container = document.getElementById('innodbContainer');
+            if (!container) return;
+
+            var mockBadge = data.mock ? ' <span style="font-size:0.7rem;background:rgba(100,100,100,0.15);padding:1px 6px;border-radius:10px;color:var(--color-text-muted)">MOCK</span>' : '';
+            var metrics = (data.sections && data.sections.metrics) || {};
+            var raw = data.raw || '';
+
+            // Key metrics bar
+            var kpiHtml = '';
+            if (Object.keys(metrics).length > 0) {
+                var kpiItems = [
+                    { key: 'history_list_length', label: 'History List Len', warn: 1000, crit: 10000 },
+                    { key: 'active_queries',      label: 'Active Queries',   warn: 50,   crit: 200 },
+                    { key: 'buffer_pool_pages',   label: 'Buffer Pool Pages', warn: null, crit: null },
+                    { key: 'free_buffers',        label: 'Free Buffers',      warn: null, crit: null },
+                ];
+                var kpiCells = kpiItems.map(function(item) {
+                    if (metrics[item.key] === undefined) return '';
+                    var val = metrics[item.key];
+                    var color = 'var(--color-success)';
+                    if (item.crit !== null && val >= item.crit) color = 'var(--color-error)';
+                    else if (item.warn !== null && val >= item.warn) color = 'var(--color-warning)';
+                    return '<div style="padding:var(--space-3) var(--space-4);border-right:1px solid var(--color-border)">'
+                        + '<div style="font-size:0.7rem;color:var(--color-text-muted);margin-bottom:2px">' + item.label + '</div>'
+                        + '<div style="font-size:1.1rem;font-weight:600;color:' + color + ';font-family:monospace">' + val + '</div>'
+                        + '</div>';
+                }).join('');
+                kpiHtml = '<div style="display:flex;flex-wrap:wrap;border-bottom:1px solid var(--color-border)">' + kpiCells + '</div>';
+            }
+
+            // Section tabs
+            var sections = (data.sections && data.sections.sections) || {};
+            var sectionKeys = Object.keys(sections).filter(function(k) { return k && sections[k]; });
+
+            // Color-code key sections
+            var sectionColors = {
+                'TRANSACTIONS':    'var(--color-warning)',
+                'DEADLOCK':        'var(--color-error)',
+                'LATEST DETECTED DEADLOCK': 'var(--color-error)',
+                'SEMAPHORES':      'var(--color-blue,#4f98a3)',
+                'FILE I/O':        'var(--color-text-muted)',
+                'LOG':             'var(--color-success)',
+                'BUFFER POOL AND MEMORY': 'var(--color-primary)',
+            };
+
+            // Build section buttons
+            var sectionBtns = sectionKeys.map(function(k, i) {
+                var color = sectionColors[k] || 'var(--color-text-muted)';
+                var hasDead = k.toUpperCase().includes('DEAD');
+                var badge = hasDead ? ' 🔴' : '';
+                return '<button onclick="InnodbStatus.showSection(' + JSON.stringify(k) + ')" '
+                    + 'id="innoSecBtn_' + i + '" '
+                    + 'style="padding:4px 10px;font-size:0.72rem;border-radius:var(--radius-sm);border:1px solid var(--color-border);background:var(--color-surface);color:' + color + ';cursor:pointer;white-space:nowrap">'
+                    + k + badge + '</button>';
+            }).join('');
+
+            // Default show: TRANSACTIONS or first
+            var defaultSection = sectionKeys.indexOf('TRANSACTIONS') >= 0 ? 'TRANSACTIONS'
+                : (sectionKeys[0] || null);
+
+            var sectionsStore = JSON.stringify(sections);
+
+            var html = '<div style="padding:var(--space-3) var(--space-4);font-size:var(--text-sm);color:var(--color-text-muted);border-bottom:1px solid var(--color-border);display:flex;align-items:center;gap:var(--space-2)">'
+                + '<svg width="13" height="13" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2"><ellipse cx="12" cy="5" rx="9" ry="3"/><path d="M21 12c0 1.66-4 3-9 3s-9-1.34-9-3"/><path d="M3 5v14c0 1.66 4 3 9 3s9-1.34 9-3V5"/></svg>'
+                + ' SHOW ENGINE INNODB STATUS — <strong>' + nodeId + '</strong>' + mockBadge
+                + '</div>'
+                + kpiHtml;
+
+            if (sectionBtns) {
+                html += '<div style="padding:var(--space-2) var(--space-4);display:flex;flex-wrap:wrap;gap:var(--space-1);border-bottom:1px solid var(--color-border);background:var(--color-surface-offset)">'
+                    + sectionBtns + '</div>'
+                    + '<div id="innodbSectionContent" style="padding:var(--space-4);font-family:monospace;font-size:0.78rem;white-space:pre-wrap;line-height:1.6;max-height:500px;overflow-y:auto;color:var(--color-text);background:var(--color-bg)"></div>';
+            } else {
+                html += '<div style="padding:var(--space-4);font-family:monospace;font-size:0.78rem;white-space:pre-wrap;line-height:1.6;max-height:600px;overflow-y:auto">'
+                    + InnodbStatus.escapeHtml(raw) + '</div>';
+            }
+
+            // Raw toggle
+            html += '<div style="padding:var(--space-2) var(--space-4);border-top:1px solid var(--color-border)">'
+                + '<button onclick="InnodbStatus.toggleRaw()" style="font-size:0.72rem;color:var(--color-text-muted);background:none;border:none;cursor:pointer;padding:0">▼ Показать полный вывод</button>'
+                + '</div>'
+                + '<div id="innodbRawBlock" style="display:none;padding:var(--space-4);border-top:1px solid var(--color-border)">'
+                + '<pre style="font-size:0.72rem;line-height:1.5;white-space:pre-wrap;max-height:400px;overflow-y:auto;margin:0">'
+                + InnodbStatus.escapeHtml(raw) + '</pre></div>';
+
+            container.innerHTML = html;
+
+            // Store sections for onclick
+            container._sections = sections;
+
+            if (defaultSection) InnodbStatus.showSection(defaultSection);
+        },
+        showSection: function(key) {
+            var container = document.getElementById('innodbContainer');
+            var el = document.getElementById('innodbSectionContent');
+            if (!el || !container) return;
+            var sections = container._sections || {};
+            var text = sections[key] || '(пусто)';
+
+            // Highlight important patterns
+            var highlighted = InnodbStatus.escapeHtml(text)
+                .replace(/DEADLOCK/g, '<span style="color:var(--color-error);font-weight:700">DEADLOCK</span>')
+                .replace(/(LOCK WAIT|WAITING FOR)/g, '<span style="color:var(--color-warning);font-weight:600">$1</span>')
+                .replace(/(trx id \d+)/gi, '<span style="color:var(--color-primary)">$1</span>');
+
+            el.innerHTML = highlighted;
+        },
+        toggleRaw: function() {
+            var el = document.getElementById('innodbRawBlock');
+            if (!el) return;
+            el.style.display = el.style.display === 'none' ? 'block' : 'none';
+        },
+        escapeHtml: function(str) {
+            return String(str)
+                .replace(/&/g, '&amp;')
+                .replace(/</g, '&lt;')
+                .replace(/>/g, '&gt;');
         }
     };
+
+    // Expose to global nav for page-docs onclick
+    window.InnodbStatus = InnodbStatus;
+
 
 </script>
 </body>

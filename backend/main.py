@@ -878,6 +878,151 @@ async def diagnostics_check_all():
     return {"results": results, "all_ok": all_ok, "checked_at": time.strftime("%H:%M:%S")}
 
 
+# ── D2: INNODB STATUS ─────────────────────────────────────────
+@app.get("/api/node/{node_id}/innodb-status")
+async def node_innodb_status(node_id: str):
+    """SHOW ENGINE INNODB STATUS — full output with parsed sections."""
+    cfg      = load_config()
+    use_mock = cfg.get("settings", {}).get("use_mock", True)
+
+    if use_mock:
+        mock_output = """=====================================
+2026-04-01 02:00:00 0x7f1234 INNODB MONITOR OUTPUT
+=====================================
+Per second averages calculated from the last 4 seconds
+-----------------
+BACKGROUND THREAD
+-----------------
+srv_master_thread loops: 10 srv_active, 0 srv_shutdown, 5 srv_idle
+--------------
+SEMAPHORES
+--------------
+OS WAIT ARRAY INFO: reservation count 12, signal count 12
+RW-shared spins 0, rounds 0, OS waits 0
+--------------
+TRANSACTIONS
+--------------
+Trx id counter 10584
+Purge done for trx's n:o < 10580 undo n:o < 0 state: running
+History list length 0
+LIST OF TRANSACTIONS FOR EACH SESSION:
+---TRANSACTION 10583, ACTIVE 0 sec
+MySQL thread id 5, OS thread handle 139710, query id 120 localhost root
+SHOW ENGINE INNODB STATUS
+--------
+FILE I/O
+--------
+I/O thread 0 state: waiting for completed aio requests (insert buffer thread)
+I/O thread 1 state: waiting for completed aio requests (log thread)
+-------------------------------------
+INSERT BUFFER AND ADAPTIVE HASH INDEX
+-------------------------------------
+Ibuf: size 1, free list len 0, seg size 2, 0 merges
+Hash table size 34679, node heap has 0 buffer(s)
+---
+LOG
+---
+Log sequence number 17394583
+Log flushed up to   17394583
+Pages flushed up to 17394583
+Last checkpoint at  17394574
+----------------------------
+BUFFER POOL AND MEMORY
+----------------------------
+Total large memory allocated 137363456
+Buffer pool size   8192
+Free buffers       7737
+Database pages     453
+--------------
+ROW OPERATIONS
+--------------
+0 queries inside InnoDB, 0 queries in queue
+----------------------------
+END OF INNODB MONITOR OUTPUT
+============================"""
+        return {
+            "node_id": node_id,
+            "raw": mock_output,
+            "sections": _parse_innodb_sections(mock_output),
+            "mock": True,
+        }
+
+    nodes = [n for n in cfg.get("nodes", []) if n.get("id") == node_id or n.get("name") == node_id]
+    if not nodes:
+        raise HTTPException(404, f"Node '{node_id}' not found")
+    node = nodes[0]
+
+    try:
+        import pymysql
+        db_cfg = cfg.get("db", {})
+        user   = node.get("db_user")   or db_cfg.get("user",     "monitor")
+        passwd = node.get("db_password") or db_cfg.get("password", "")
+        conn   = pymysql.connect(
+            host=node["host"], port=int(node.get("port", 3306)),
+            user=user, password=passwd,
+            connect_timeout=6, read_timeout=10,
+        )
+        with conn.cursor() as cur:
+            cur.execute("SHOW ENGINE INNODB STATUS")
+            row = cur.fetchone()
+        conn.close()
+        raw = row[2] if row and len(row) >= 3 else (row[0] if row else "")
+        _push_event("info", f"InnoDB status fetched for {node_id}", "diagnostics")
+        return {
+            "node_id": node_id,
+            "raw": raw,
+            "sections": _parse_innodb_sections(raw),
+            "mock": False,
+        }
+    except Exception as e:
+        raise HTTPException(500, f"DB error: {e}")
+
+
+def _parse_innodb_sections(raw: str) -> dict:
+    """Split InnoDB status output into named sections."""
+    import re
+    section_re = re.compile(r'^-{3,}\n([A-Z][A-Z ]+)\n-{3,}', re.MULTILINE)
+    # Also handle ===... headers
+    lines = raw.splitlines()
+    sections: dict = {}
+    current = "HEADER"
+    buf: list = []
+
+    for line in lines:
+        # Detect section separators like "---" or "====="
+        stripped = line.strip("-= \t")
+        if set(line.strip()) <= set("-=") and len(line.strip()) >= 3:
+            if buf and current:
+                sections[current] = "\n".join(buf).strip()
+            current = None
+            buf = []
+        elif current is None and line.strip() and not set(line.strip()) <= set("-="):
+            current = line.strip()
+        else:
+            buf.append(line)
+
+    if current and buf:
+        sections[current] = "\n".join(buf).strip()
+
+    # Key metrics extraction
+    metrics = {}
+    for line in lines:
+        if "History list length" in line:
+            try: metrics["history_list_length"] = int(line.split()[-1])
+            except: pass
+        if "queries inside InnoDB" in line:
+            try: metrics["active_queries"] = int(line.split()[0])
+            except: pass
+        if "Buffer pool size" in line and "Buffer pool size   " in line:
+            try: metrics["buffer_pool_pages"] = int(line.split()[-1])
+            except: pass
+        if "Free buffers" in line:
+            try: metrics["free_buffers"] = int(line.split()[-1])
+            except: pass
+
+    return {"sections": sections, "metrics": metrics}
+
+
 # ── WEBSOCKET MANAGER ─────────────────────────────────────────
 class _WsManager:
     def __init__(self):

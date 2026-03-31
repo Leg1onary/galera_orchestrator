@@ -764,6 +764,109 @@ async def compare_galera_cnf():
     return {"nodes": list(node_results.keys()), "details": node_results, "diff": diffs, "mock": False}
 
 
+
+
+# ── D5: DIAGNOSTICS CHECK-ALL ─────────────────────────────────
+@app.get("/api/diagnostics/check-all")
+async def diagnostics_check_all():
+    """Parallel SSH + DB connectivity check for all enabled nodes."""
+    import asyncio, time
+
+    cfg      = load_config()
+    use_mock = cfg.get("settings", {}).get("use_mock", True)
+    nodes    = [n for n in cfg.get("nodes", []) if n.get("enabled", True)]
+
+    if use_mock:
+        results = []
+        for node in nodes:
+            results.append({
+                "node_id":  node["id"],
+                "name":     node.get("name", node["id"]),
+                "host":     node.get("host", ""),
+                "ok":       True,
+                "ssh":      {"ok": True,  "message": "SSH OK (mock)", "latency_ms": 3},
+                "db":       {"ok": True,  "message": "MariaDB OK (mock)"},
+                "elapsed_ms": 5,
+                "mock":     True,
+            })
+        return {"results": results, "all_ok": True, "checked_at": time.strftime("%H:%M:%S")}
+
+    try:
+        import paramiko, pymysql
+    except ImportError as e:
+        raise HTTPException(500, f"Missing dependency: {e}")
+
+    def check_node(node: dict) -> dict:
+        t0  = time.monotonic()
+        nid = node["id"]
+        out = {
+            "node_id": nid,
+            "name":    node.get("name", nid),
+            "host":    node.get("host", ""),
+            "ok":      False,
+            "ssh":     {"ok": False, "message": ""},
+            "db":      {"ok": False, "message": ""},
+            "elapsed_ms": 0,
+            "mock":    False,
+        }
+
+        # SSH
+        try:
+            client = paramiko.SSHClient()
+            client.set_missing_host_key_policy(paramiko.AutoAddPolicy())
+            client.connect(
+                node.get("host", ""), port=int(node.get("ssh_port", 22)),
+                username=node.get("ssh_user", "root"),
+                key_filename=str(Path(node.get("ssh_key", "~/.ssh/id_rsa")).expanduser()),
+                timeout=6, banner_timeout=6,
+            )
+            _, so, _ = client.exec_command("echo ok", timeout=4)
+            ssh_out = so.read().decode().strip()
+            client.close()
+            out["ssh"] = {"ok": ssh_out == "ok", "message": "SSH OK" if ssh_out == "ok" else f"unexpected: {ssh_out}",
+                          "latency_ms": int((time.monotonic() - t0) * 1000)}
+        except Exception as e:
+            out["ssh"] = {"ok": False, "message": str(e)}
+
+        # DB
+        t1 = time.monotonic()
+        try:
+            db_cfg = cfg.get("db", {})
+            user   = node.get("db_user")   or db_cfg.get("user",     "monitor")
+            passwd = node.get("db_password") or db_cfg.get("password", "")
+            conn = pymysql.connect(
+                host=node["host"], port=int(node.get("port", 3306)),
+                user=user, password=passwd,
+                connect_timeout=4, read_timeout=4,
+            )
+            with conn.cursor() as cur:
+                cur.execute("SELECT @@wsrep_local_state_comment")
+                state = cur.fetchone()
+            conn.close()
+            state_str = state[0] if state else "unknown"
+            out["db"] = {"ok": True, "message": f"MariaDB OK · state={state_str}",
+                         "latency_ms": int((time.monotonic() - t1) * 1000)}
+        except Exception as e:
+            out["db"] = {"ok": False, "message": str(e)}
+
+        out["ok"] = out["ssh"]["ok"] and out["db"]["ok"]
+        out["elapsed_ms"] = int((time.monotonic() - t0) * 1000)
+        return out
+
+    import concurrent.futures
+    with concurrent.futures.ThreadPoolExecutor(max_workers=len(nodes) or 1) as executor:
+        futures = {executor.submit(check_node, n): n for n in nodes}
+        results = [f.result() for f in concurrent.futures.as_completed(futures)]
+
+    all_ok = all(r["ok"] for r in results)
+    _push_event(
+        "info" if all_ok else "warning",
+        "Diagnostics check-all: " + ("all OK" if all_ok else f"{sum(1 for r in results if not r['ok'])}/{len(results)} FAIL"),
+        "diagnostics"
+    )
+    return {"results": results, "all_ok": all_ok, "checked_at": time.strftime("%H:%M:%S")}
+
+
 @app.websocket("/ws/cluster")
 async def ws_cluster(ws: WebSocket):
     await ws.accept()

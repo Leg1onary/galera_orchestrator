@@ -1017,7 +1017,7 @@
             <div class="page-header">
                 <div>
                     <h1 class="page-title">Топология</h1>
-                    <p class="page-subtitle">Схема MariaDB Galera Cluster — тестовый контур</p>
+                    <p class="page-subtitle" id="topoSubtitle">Схема MariaDB Galera Cluster</p>
                 </div>
             </div>
 
@@ -1913,7 +1913,7 @@
             }));
             var clStatus = n0.wsrep_cluster_status;
             var fcOk = (parseFloat(n0.wsrep_flow_control_paused) < 0.05 && parseFloat(n1.wsrep_flow_control_paused) < 0.05);
-            var certFail = '0';
+            var certFail = activeNodes.reduce(function(s, n) { return s + (parseInt(n.metrics.wsrep_local_cert_failures) || 0); }, 0).toString();
             var queue = Math.max.apply(null, activeNodes.map(function(n){ return parseInt(n.metrics.wsrep_local_recv_queue)||0; }));
 
             var statusClass = clStatus === 'Primary' ? 'ok' : 'error';
@@ -1926,13 +1926,22 @@
             var _arbOnline  = _arbsKpi.filter(function(a){ return a.online !== false; }).length;
             var clSizeSub   = _arbCount > 0 ? total + ' нод + ' + _arbCount + ' арб' : 'wsrep_cluster_size';
             var syncedSub   = _arbCount > 0 ? 'нод · arb ' + _arbOnline + '/' + _arbCount : 'узлов синхронизировано';
+            // A6: дельта seqno (replication lag)
+            var seqNos = activeNodes.map(function(n) { return parseInt(n.metrics.wsrep_last_committed) || 0; }).filter(function(s) { return s > 0; });
+            var seqLag = seqNos.length > 1 ? (Math.max.apply(null, seqNos) - Math.min.apply(null, seqNos)) : 0;
+            var seqLagClass = seqLag === 0 ? 'ok' : (seqLag < 5 ? 'warn' : 'error');
+
             grid.innerHTML = [
                 kpiHtml('Cluster Status', clStatus, statusClass, 'wsrep_cluster_status'),
                 kpiHtml('Cluster Size', clSize + '/' + total, clSize >= total ? 'ok' : 'error', clSizeSub),
                 kpiHtml('Synced Nodes', synced + '/' + total, synced >= total ? 'ok' : (synced > 0 ? 'warn' : 'error'), syncedSub),
                 kpiHtml('Flow Control', fcOk ? 'Normal' : 'Active', fcClass, 'wsrep_flow_control_paused'),
                 kpiHtml('Recv Queue', queue.toString(), queue === 0 ? 'ok' : 'warn', 'max по нодам'),
-                kpiHtml('Cert Failures', certFail, 'ok', 'wsrep_local_cert_failures'),
+                kpiHtml('Repl Lag', seqLag === 0 ? 'In Sync' : seqLag + ' txn', seqLagClass, 'max Δ seqno между нодами'),
+                (function() {
+                    var bfAborts = activeNodes.reduce(function(s, n) { return s + (parseInt(n.metrics.wsrep_bf_aborts) || 0); }, 0);
+                    return kpiHtml('Cert Fail / BF Abort', certFail + ' / ' + bfAborts, (parseInt(certFail) > 0 || bfAborts > 0) ? 'warn' : 'ok', 'cert_failures / bf_aborts');
+                })(),
             ].join('');
         }
 
@@ -2116,7 +2125,8 @@
             if (sz && n0.metrics) {
                 sz.textContent = 'Cluster Size: ' + (n0.metrics.wsrep_cluster_size || '—') +
                     ' · Status: ' + (n0.metrics.wsrep_cluster_status || '—') +
-                    ' · Cert Failures: ' + (n0.metrics.wsrep_local_cert_failures || '0');
+                    ' · Cert Failures: ' + (n0.metrics.wsrep_local_cert_failures || '0') +
+                    ' · BF Aborts: ' + (n0.metrics.wsrep_bf_aborts || '0');
             }
 
             // Арбитр — отображаем в PROD контуре
@@ -2165,7 +2175,9 @@
                     var v0 = n0.metrics[k]; var c0 = metricClass(k, v0);
                     return '<tr><td class="mono">' + k + '</td><td class="' + c0 + '">' + v0 + '</td><td style="color:var(--color-text-muted)">—</td></tr>';
                 }).join('');
-                tbl.innerHTML = '<table><thead><tr><th>Переменная</th><th>' + n0.name + '</th><th>—</th></tr></thead><tbody>' + rows1 + '</tbody></table>';
+                var seq0s = parseInt(n0.metrics.wsrep_last_committed) || 0;
+                var seqRow1 = '<tr style="background:var(--color-surface-offset)"><td class="mono" style="font-weight:700">⊿ seqno</td><td class="ok" style="font-weight:700">' + seq0s + '</td><td style="color:var(--color-text-muted)">—</td></tr>';
+                tbl.innerHTML = '<table><thead><tr><th>Переменная</th><th>' + n0.name + '</th><th>—</th></tr></thead><tbody>' + seqRow1 + rows1 + '</tbody></table>';
                 return;
             }
             var keys = Object.keys(n0.metrics);
@@ -2174,7 +2186,17 @@
                 var c0 = metricClass(k, v0); var c1 = metricClass(k, v1);
                 return '<tr><td class="mono">' + k + '</td><td class="' + c0 + '">' + v0 + '</td><td class="' + c1 + '">' + v1 + '</td></tr>';
             }).join('');
-            tbl.innerHTML = '<table><thead><tr><th>Переменная</th><th>' + n0.name + '</th><th>' + n1.name + '</th></tr></thead><tbody>' + rows + '</tbody></table>';
+            // Вычисляем дельту seqno между нодами
+            var seq0 = parseInt(n0.metrics.wsrep_last_committed) || 0;
+            var seq1 = parseInt(n1.metrics.wsrep_last_committed) || 0;
+            var seqDelta = Math.abs(seq0 - seq1);
+            var deltaClass = seqDelta === 0 ? 'ok' : (seqDelta < 10 ? 'warn' : 'error');
+            var deltaRow = '<tr style="background:var(--color-surface-offset)">' +
+                '<td class="mono" style="font-weight:700">⊿ seqno lag</td>' +
+                '<td class="' + deltaClass + '" style="font-weight:700">' + seq0 + '</td>' +
+                '<td class="' + deltaClass + '" style="font-weight:700">' + seq1 + ' <span style="font-size:var(--text-xs);opacity:.7">(Δ=' + seqDelta + ')</span></td>' +
+                '</tr>';
+            tbl.innerHTML = '<table><thead><tr><th>Переменная</th><th>' + n0.name + '</th><th>' + n1.name + '</th></tr></thead><tbody>' + deltaRow + rows + '</tbody></table>';
         }
 
         // ---- HEADER STATUS ----
@@ -2545,6 +2567,12 @@
             var sub = document.getElementById('overviewSubtitle');
             if (sub) sub.textContent = (_env === 'prod' ? 'Продуктивный' : 'Тестовый') +
                 ' контур · ' + (_dataMode === 'mock' ? 'симуляция' : 'реальные данные');
+            var topoSub = document.getElementById('topoSubtitle');
+            if (topoSub) topoSub.textContent = 'Схема ' + ((clusterData.cluster && clusterData.cluster.name) || 'Galera Cluster') +
+                ' — ' + (_env === 'prod' ? 'Продуктивный' : 'Тестовый') + ' контур';
+            var topoLbl = document.getElementById('topoClusterLabel');
+            if (topoLbl) topoLbl.textContent = ((clusterData.cluster && clusterData.cluster.name) || 'Galera Cluster') +
+                ' — ' + (_env === 'prod' ? 'PROD' : 'TEST');
         }
 
         // ---- PUBLIC API ----

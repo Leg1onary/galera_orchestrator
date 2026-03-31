@@ -9,6 +9,7 @@ from fastapi.staticfiles import StaticFiles
 from pydantic import BaseModel
 from typing import Optional
 
+
 from config import load_config, save_config
 from galera_client import get_cluster_status
 from mock_data import set_scenario, get_scenario
@@ -411,8 +412,8 @@ async def _do_reload():
     nodes = [n["id"] for n in cfg.get("nodes", []) if n.get("enabled")]
     arbs  = [a for a in cfg.get("arbitrators", []) if a.get("enabled", True)]
     mode  = "mock" if cfg.get("settings", {}).get("use_mock", True) else "real"
-    log.info(f"Config reloaded | nodes={nodes} | arbitrator={arb} | mode={mode}")
-    return {"ok": True, "nodes": nodes, "arbitrator": arb, "mode": mode}
+    log.info(f"Config reloaded | nodes={nodes} | arbitrators={arbs} | mode={mode}")
+    return {"ok": True, "nodes": nodes, "arbitrators": arbs, "mode": mode}
 
 @app.post("/api/reload")
 async def reload_config():
@@ -831,4 +832,3 @@ async def node_action(node_id: str, payload: NodeActionPayload):
     except Exception as e:
         log.error(f"[SSH] {node_id} action failed: {e}")
         raise HTTPException(502, f"SSH error on {node_id}: {e}")
-        

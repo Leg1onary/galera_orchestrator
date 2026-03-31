@@ -11,8 +11,9 @@ nodes:
     ssh_port: 22
     ssh_user: root
     ssh_key: /home/user/.ssh/id_rsa    # абсолютный путь к ключу
-    db_user: monitor_user              # per-node (опционально, иначе берётся из db.user)
+    db_user: monitor_user              # per-node (опционально)
     db_password: ""                    # per-node (опционально)
+    dc: DC1                            # Датацентр / сегмент
     enabled: true
 
   - id: gc02
@@ -22,18 +23,52 @@ nodes:
     ssh_port: 22
     ssh_user: root
     ssh_key: /home/user/.ssh/id_rsa
+    dc: DC1
     enabled: true
 
-# Арбитр — только для PROD контура (env: prod)
-arbitrator:
-  enabled: false
-  host: 192.168.1.12
-  ssh_port: 22
-  ssh_user: root
-  ssh_key: /home/user/.ssh/id_rsa
+  - id: gc03
+    name: gc03
+    host: 192.168.2.10
+    port: 3306
+    ssh_port: 22
+    ssh_user: root
+    ssh_key: /home/user/.ssh/id_rsa
+    dc: DC2
+    enabled: true
+
+  - id: gc04
+    name: gc04
+    host: 192.168.2.11
+    port: 3306
+    ssh_port: 22
+    ssh_user: root
+    ssh_key: /home/user/.ssh/id_rsa
+    dc: DC2
+    enabled: true
+
+# Арбитры — по одному на каждый ДЦ (для test и prod контуров)
+# garbd участвует в кворуме, но не хранит данных
+# Рекомендуется при чётном числе нод данных
+arbitrators:
+  - id: arb01
+    host: 192.168.1.12
+    ssh_port: 22
+    ssh_user: root
+    ssh_key: /home/user/.ssh/id_rsa
+    dc: DC1
+    enabled: true
+
+  - id: arb02
+    host: 192.168.2.12
+    ssh_port: 22
+    ssh_user: root
+    ssh_key: /home/user/.ssh/id_rsa
+    dc: DC2
+    enabled: true
 
 # Глобальные credentials для подключения к MariaDB
-# Создать пользователя: GRANT SELECT, PROCESS, REPLICATION CLIENT ON *.* TO 'monitor_user'@'%' IDENTIFIED BY 'strong_password';
+# Создать пользователя:
+#   GRANT SELECT, PROCESS, REPLICATION CLIENT ON *.* TO 'monitor_user'@'%' IDENTIFIED BY 'strong_password';
 db:
   user: monitor_user
   password: CHANGE_ME

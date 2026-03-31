@@ -819,6 +819,100 @@
         ::-webkit-scrollbar { width: 6px; height: 6px; }
         ::-webkit-scrollbar-track { background: transparent; }
         ::-webkit-scrollbar-thumb { background: var(--border-strong); border-radius: 9999px; }
+
+        /* ── MAINTENANCE WIZARD ─────────────────────────────────── */
+        .wizard-wrap {
+            background: var(--surface);
+            border: 1px solid var(--border);
+            border-radius: var(--radius-xl);
+            padding: var(--space-6);
+            margin-bottom: var(--space-6);
+            box-shadow: var(--shadow-sm);
+        }
+        .wizard-steps {
+            display: flex;
+            align-items: flex-start;
+            gap: 0;
+            margin-bottom: var(--space-6);
+            overflow-x: auto;
+        }
+        .wizard-step {
+            display: flex;
+            flex-direction: column;
+            align-items: center;
+            flex: 1;
+            min-width: 70px;
+            position: relative;
+        }
+        .wizard-step:not(:last-child)::after {
+            content: '';
+            position: absolute;
+            top: 14px;
+            left: calc(50% + 14px);
+            width: calc(100% - 28px);
+            height: 2px;
+            background: var(--border);
+            z-index: 0;
+        }
+        .wizard-step.done:not(:last-child)::after { background: var(--success); }
+        .wizard-step-num {
+            width: 28px; height: 28px;
+            border-radius: 50%;
+            display: flex; align-items: center; justify-content: center;
+            font-size: 11px; font-weight: 700;
+            background: var(--surface-3);
+            border: 2px solid var(--border);
+            color: var(--text-muted);
+            position: relative; z-index: 1;
+            transition: all 0.2s;
+        }
+        .wizard-step.done   .wizard-step-num { background: var(--success); border-color: var(--success); color: #fff; }
+        .wizard-step.active .wizard-step-num { background: var(--primary); border-color: var(--primary); color: #fff; }
+        .wizard-step-label {
+            font-size: 9px;
+            color: var(--text-muted);
+            margin-top: 4px;
+            text-align: center;
+            line-height: 1.2;
+            max-width: 70px;
+            word-break: break-word;
+        }
+        .wizard-step.active .wizard-step-label { color: var(--primary); font-weight: 600; }
+        .wizard-step.done   .wizard-step-label { color: var(--success); }
+        .wizard-body { min-height: 120px; }
+        .wizard-action-row {
+            display: flex; gap: var(--space-3);
+            margin-top: var(--space-5);
+            align-items: center; flex-wrap: wrap;
+        }
+        .wizard-log {
+            background: var(--surface-offset);
+            border: 1px solid var(--border);
+            border-radius: var(--radius-md);
+            padding: var(--space-3) var(--space-4);
+            font-family: var(--font-mono);
+            font-size: var(--text-xs);
+            color: var(--text-muted);
+            max-height: 150px;
+            overflow-y: auto;
+            margin-top: var(--space-4);
+            line-height: 1.7;
+        }
+        .wizard-log .wl-ok   { color: var(--success); }
+        .wizard-log .wl-wait { color: var(--warning); }
+        .wizard-log .wl-err  { color: var(--error); }
+        .wizard-log .wl-info { color: var(--primary); }
+        .wizard-poll-bar {
+            height: 4px; border-radius: 2px;
+            background: var(--surface-3);
+            margin-top: var(--space-3); overflow: hidden;
+        }
+        .wizard-poll-fill {
+            height: 100%;
+            background: var(--primary);
+            transition: width 0.4s;
+            border-radius: 2px;
+        }
     </style>
 </head>
 <body>
@@ -927,6 +1021,10 @@
         <button class="nav-item" onclick="App.go('recovery')">
             <svg width="18" height="18" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2"><path d="M10.29 3.86 1.82 18a2 2 0 0 0 1.71 3h16.94a2 2 0 0 0 1.71-3L13.71 3.86a2 2 0 0 0-3.42 0z"/><line x1="12" y1="9" x2="12" y2="13"/><line x1="12" y1="17" x2="12.01" y2="17"/></svg>
             Recovery
+        </button>
+        <button class="nav-item" onclick="App.go('maintenance')">
+            <svg width="18" height="18" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2"><path d="M14.7 6.3a1 1 0 0 0 0 1.4l1.6 1.6a1 1 0 0 0 1.4 0l3.77-3.77a6 6 0 0 1-7.94 7.94l-6.91 6.91a2.12 2.12 0 0 1-3-3l6.91-6.91a6 6 0 0 1 7.94-7.94l-3.76 3.76z"/></svg>
+            Обслуживание
         </button>
         <button class="nav-item" onclick="App.go('settings')">
             <svg width="18" height="18" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2"><circle cx="12" cy="12" r="3"/><path d="M19.07 4.93a10 10 0 0 1 0 14.14M4.93 4.93a10 10 0 0 0 0 14.14"/><path d="M12 2v2M12 20v2M2 12h2M20 12h2"/></svg>
@@ -1186,6 +1284,72 @@
                         <li>Перезапустить отставшую через Rejoin</li>
                     </ol>
                 </div>
+            </div>
+        </section>
+
+        <!-- ====== PAGE: MAINTENANCE WIZARD ====== -->
+        <section class="page" id="page-maintenance">
+            <div class="page-header">
+                <div>
+                    <h1 class="page-title">Обслуживание</h1>
+                    <p class="page-subtitle">Плановый вывод ноды из кластера и возврат в работу</p>
+                </div>
+            </div>
+
+            <!-- Wizard card -->
+            <div class="wizard-wrap" id="maintWizardWrap">
+                <div style="display:flex;align-items:center;justify-content:space-between;margin-bottom:var(--space-5);flex-wrap:wrap;gap:var(--space-3)">
+                    <div>
+                        <div style="font-size:var(--text-base);font-weight:700;color:var(--text);margin-bottom:4px">
+                            <svg width="16" height="16" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" style="vertical-align:-2px;margin-right:6px"><path d="M14.7 6.3a1 1 0 0 0 0 1.4l1.6 1.6a1 1 0 0 0 1.4 0l3.77-3.77a6 6 0 0 1-7.94 7.94l-6.91 6.91a2.12 2.12 0 0 1-3-3l6.91-6.91a6 6 0 0 1 7.94-7.94l-3.76 3.76z"/></svg>
+                            Maintenance Wizard
+                        </div>
+                        <div style="font-size:var(--text-sm);color:var(--text-muted)">Безопасный последовательный вывод ноды на техобслуживание с автоматическим контролем состояний</div>
+                    </div>
+                    <div style="display:flex;gap:var(--space-3);align-items:center;flex-wrap:wrap">
+                        <div class="form-group" style="margin:0;min-width:220px">
+                            <select class="form-input" id="maintNodeSelect" style="margin:0" onchange="if(this.value) maintInitNode(this.value);">
+                                <option value="">— выберите ноду —</option>
+                            </select>
+                        </div>
+                        <button class="btn btn-ghost btn-sm" onclick="App.maintReset()" id="maintResetBtn" style="display:none">
+                            <svg width="13" height="13" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2.5"><polyline points="23 4 23 10 17 10"/><path d="M20.49 15a9 9 0 1 1-.02-8.49"/></svg>
+                            Сброс
+                        </button>
+                    </div>
+                </div>
+
+                <!-- Step tracker -->
+                <div class="wizard-steps" id="maintSteps"></div>
+
+                <!-- Step body -->
+                <div class="wizard-body" id="maintBody">
+                    <div style="color:var(--text-muted);font-size:var(--text-sm);padding:var(--space-4) 0">Выберите ноду выше для начала работы</div>
+                </div>
+
+                <!-- Log -->
+                <div class="wizard-log" id="maintLog" style="display:none"></div>
+                <!-- Progress bar -->
+                <div class="wizard-poll-bar" id="maintPollBar" style="display:none">
+                    <div class="wizard-poll-fill" id="maintPollFill" style="width:0%"></div>
+                </div>
+            </div>
+
+            <!-- Info -->
+            <div class="card" style="margin-bottom:var(--space-6)">
+                <div class="card-title">
+                    <svg width="16" height="16" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2"><circle cx="12" cy="12" r="10"/><line x1="12" y1="8" x2="12" y2="12"/><line x1="12" y1="16" x2="12.01" y2="16"/></svg>
+                    Последовательность шагов
+                </div>
+                <ol style="font-size:var(--text-sm);color:var(--text-muted);padding-left:var(--space-5);line-height:2.2;margin-top:var(--space-3)">
+                    <li><strong style="color:var(--text)">Read-Only ON</strong> — <code style="font-family:var(--font-mono)">SET GLOBAL read_only = ON</code></li>
+                    <li><strong style="color:var(--text)">Ожидание очереди</strong> — ждём <code style="font-family:var(--font-mono)">wsrep_local_recv_queue = 0</code></li>
+                    <li><strong style="color:var(--text)">Stop MariaDB</strong> — <code style="font-family:var(--font-mono)">systemctl stop mariadb.service</code></li>
+                    <li><strong style="color:var(--text)">⚙ Ваши работы</strong> — пауза для технических операций на ноде</li>
+                    <li><strong style="color:var(--text)">Start MariaDB</strong> — <code style="font-family:var(--font-mono)">systemctl start mariadb.service</code></li>
+                    <li><strong style="color:var(--text)">Ожидание Synced</strong> — ждём <code style="font-family:var(--font-mono)">wsrep_local_state_comment = Synced</code></li>
+                    <li><strong style="color:var(--text)">Read-Only OFF</strong> — <code style="font-family:var(--font-mono)">SET GLOBAL read_only = OFF</code></li>
+                </ol>
             </div>
         </section>
 
@@ -2552,7 +2716,15 @@
             var clName = (clusterData.cluster && clusterData.cluster.name) || 'galera_cluster';
             var clEnv  = (clusterData.cluster && (clusterData.cluster.environment || clusterData.cluster.contour)) || 'test';
             var yaml = 'cluster:\n  name: ' + clName + '\n  environment: ' + clEnv + '\n\nnodes:\n';
-            clusterData.nodes.forEach(function(n) {
+            // Fallback: если clusterData.nodes ещё не загружен — берём из _configNodes
+            var nodeList = (clusterData.nodes && clusterData.nodes.length)
+                ? clusterData.nodes
+                : _configNodes.map(function(cn) {
+                    return { id: cn.id, name: cn.name||cn.id, host: cn.host||'', port: cn.port||3306,
+                        ssh_port: cn.ssh_port||22, ssh_user: cn.ssh_user||'root', ssh_key: cn.ssh_key||'~/.ssh/id_rsa',
+                        dc: cn.dc, db_user: cn.db_user, enabled: cn.enabled !== false };
+                });
+            nodeList.forEach(function(n) {
                 var sshPort = n.ssh_port || n.ssh || 22;
                 var sshUser = n.ssh_user || 'root';
                 var sshKey  = n.ssh_key  || '~/.ssh/id_rsa';
@@ -2589,9 +2761,9 @@
                         '    enabled: true\n';
                 });
             }
-            // DB глобальные credentials (если есть)
-            if (clusterData.db && (clusterData.db.user || clusterData.db.password)) {
-                yaml += '\ndb:\n  user: ' + (clusterData.db.user||'') + '\n  password: ' + (clusterData.db.password||'') + '\n';
+            // DB глобальные credentials (если есть; пароль скрыт)
+            if (clusterData.db && clusterData.db.user) {
+                yaml += '\ndb:\n  user: ' + clusterData.db.user + '\n  password: <скрыт>\n';
             }
             // Settings
             if (clusterData.settings) {
@@ -2737,6 +2909,7 @@
             var topoLbl = document.getElementById('topoClusterLabel');
             if (topoLbl) topoLbl.textContent = ((clusterData.cluster && clusterData.cluster.name) || 'Galera Cluster') +
                 ' — ' + (_env === 'prod' ? 'PROD' : 'TEST');
+            renderMaintNodeSelect();
         }
 
         // ---- PUBLIC API ----
@@ -2777,6 +2950,39 @@
                 document.querySelectorAll('.log-filter-btn').forEach(function(b) { b.classList.remove('active'); });
                 btn.classList.add('active');
                 renderLog();
+            },
+
+            // ── Maintenance Wizard ──────────────────────────────────
+            maintNext: function() {
+                if (!_maint.nodeId) return;
+                maintExecuteStep();
+            },
+            maintConfirmWork: function() {
+                maintLog('OK: Технические работы завершены. Продолжаем...', 'wl-ok');
+                _maint.stepIdx++;
+                maintRender();
+            },
+            maintAbort: function() {
+                if (_maint.pollTimer) clearInterval(_maint.pollTimer);
+                _maint.running=false; _maint.aborted=true;
+                var bar=document.getElementById('maintPollBar'); if(bar) bar.style.display='none';
+                maintLog('ABORT: Wizard прерван пользователем','wl-err');
+                var body=document.getElementById('maintBody');
+                if (body) body.innerHTML=
+                    '<div style="padding:var(--space-4);color:var(--error);font-size:var(--text-sm)">'+
+                    'Wizard прерван на шаге '+(_maint.stepIdx+1)+'. Проверьте состояние ноды вручную.'+
+                    '</div><div class="wizard-action-row"><button class="btn btn-primary" onclick="App.maintReset()">Начать заново</button></div>';
+            },
+            maintReset: function() {
+                if (_maint.pollTimer) clearInterval(_maint.pollTimer);
+                _maint.nodeId=null; _maint.stepIdx=0; _maint.running=false; _maint.aborted=false; _maint.logLines=[];
+                var logEl=document.getElementById('maintLog'); if(logEl){logEl.style.display='none';logEl.innerHTML='';}
+                var bar=document.getElementById('maintPollBar'); if(bar) bar.style.display='none';
+                var rb=document.getElementById('maintResetBtn'); if(rb) rb.style.display='none';
+                var sel=document.getElementById('maintNodeSelect'); if(sel) sel.value='';
+                var steps=document.getElementById('maintSteps'); if(steps) steps.innerHTML='';
+                var body=document.getElementById('maintBody');
+                if(body) body.innerHTML='<div style="color:var(--text-muted);font-size:var(--text-sm);padding:var(--space-4) 0">Выберите ноду выше для начала работы</div>';
             },
 
             exportLog: function() {
@@ -3596,6 +3802,192 @@
                     .catch(function() {});
             });
         }
+
+
+        // ════════════════════════════════════════════════════════════
+        // MAINTENANCE WIZARD
+        // ════════════════════════════════════════════════════════════
+        var _maint = { nodeId:null, stepIdx:0, running:false, aborted:false, pollTimer:null, logLines:[] };
+
+        var MAINT_STEPS = [
+            { id:'read_only_on',  label:'R/O ON',    desc:'Включить read_only',      action:'set_read_only',  wait:null },
+            { id:'wait_queue',    label:'Очередь',   desc:'Ждём recv_queue = 0',     action:null,             wait:'recv_queue_zero' },
+            { id:'stop_mariadb',  label:'Stop',      desc:'Остановить MariaDB',      action:'stop',           wait:null },
+            { id:'your_work',     label:'Работы',    desc:'Ваши технические работы', action:null,             wait:'manual_confirm' },
+            { id:'start_mariadb', label:'Start',     desc:'Запустить MariaDB',       action:'start',          wait:null },
+            { id:'wait_synced',   label:'Synced',    desc:'Ждём wsrep = Synced',     action:null,             wait:'state_synced' },
+            { id:'read_only_off', label:'R/W ON',    desc:'Выключить read_only',     action:'set_read_write', wait:null },
+        ];
+
+        function maintLog(msg, cls) {
+            cls = cls||'wl-info';
+            var ts = new Date().toLocaleTimeString('ru-RU');
+            _maint.logLines.push('<span class="'+cls+'">['+ts+'] '+msg+'</span>');
+            var el = document.getElementById('maintLog');
+            if (el) { el.style.display='block'; el.innerHTML=_maint.logLines.join('<br>'); el.scrollTop=el.scrollHeight; }
+        }
+
+        function maintRenderSteps() {
+            var el = document.getElementById('maintSteps');
+            if (!el) return;
+            el.innerHTML = MAINT_STEPS.map(function(s,i){
+                var cls = i<_maint.stepIdx ? 'done' : (i===_maint.stepIdx ? 'active' : '');
+                return '<div class="wizard-step '+cls+'">'+
+                    '<div class="wizard-step-num">'+(i<_maint.stepIdx?'✓':(i+1))+'</div>'+
+                    '<div class="wizard-step-label">'+s.label+'</div>'+
+                    '</div>';
+            }).join('');
+        }
+
+        function maintRenderBody() {
+            var el = document.getElementById('maintBody');
+            if (!el || !_maint.nodeId) return;
+            if (_maint.stepIdx >= MAINT_STEPS.length) {
+                el.innerHTML = '<div style="text-align:center;padding:var(--space-6) 0">'+
+                    '<div style="font-size:2rem;margin-bottom:var(--space-3)">✅</div>'+
+                    '<div style="font-size:var(--text-lg);font-weight:700;color:var(--success);margin-bottom:var(--space-2)">Обслуживание завершено</div>'+
+                    '<div style="font-size:var(--text-sm);color:var(--text-muted);margin-bottom:var(--space-5)">Нода <strong>'+_maint.nodeId+'</strong> возвращена в работу</div>'+
+                    '<button class="btn btn-primary" onclick="App.maintReset()">Новое обслуживание</button>'+
+                    '</div>';
+                var rb=document.getElementById('maintResetBtn'); if(rb) rb.style.display='inline-flex';
+                return;
+            }
+            var step = MAINT_STEPS[_maint.stepIdx];
+            var bodyHtml = '<div style="margin-bottom:var(--space-4)">'+
+                '<div style="font-size:var(--text-sm);color:var(--text-muted);margin-bottom:var(--space-1)">Шаг '+(_maint.stepIdx+1)+' из '+MAINT_STEPS.length+'</div>'+
+                '<div style="font-size:var(--text-base);font-weight:700;color:var(--text)">'+step.desc+'</div>'+
+                '</div>';
+            if (step.wait==='recv_queue_zero') {
+                bodyHtml += '<div style="font-size:var(--text-sm);color:var(--text-muted)">'+
+                    '&#x23F3; Ожидаем <code style="font-family:var(--font-mono)">wsrep_local_recv_queue = 0</code>...</div>';
+            } else if (step.wait==='state_synced') {
+                bodyHtml += '<div style="font-size:var(--text-sm);color:var(--text-muted)">'+
+                    '&#x23F3; Ожидаем <code style="font-family:var(--font-mono)">wsrep_local_state_comment = Synced</code>...</div>';
+            } else if (step.wait==='manual_confirm') {
+                bodyHtml += '<div style="padding:var(--space-4);background:rgba(218,113,1,.08);border:1px solid rgba(218,113,1,.3);border-radius:var(--radius-md);margin-bottom:var(--space-4)">'+
+                    '<div style="font-size:var(--text-sm);font-weight:700;color:var(--warning);margin-bottom:var(--space-2)">&#9881; Проведите технические работы</div>'+
+                    '<div style="font-size:var(--text-xs);color:var(--text-muted)">MariaDB остановлена на ноде <strong>'+_maint.nodeId+'</strong>. Нажмите кнопку ниже когда работы завершены.</div>'+
+                    '</div>';
+            }
+            var btns = '<div class="wizard-action-row">';
+            if (step.wait==='manual_confirm') {
+                btns += '<button class="btn btn-success btn-lg" onclick="App.maintConfirmWork()">'+
+                    '<svg width="16" height="16" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2.5"><polyline points="20 6 9 17 4 12"/></svg>'+
+                    ' Работы завершены — продолжить</button>';
+            } else if (step.action && !_maint.running) {
+                var bc = step.action==='stop'?'btn-warning':step.action==='set_read_only'?'btn-warning':step.action==='set_read_write'?'btn-success':'btn-primary';
+                btns += '<button class="btn '+bc+' btn-lg" onclick="App.maintNext()">Выполнить: <strong>'+step.desc+'</strong></button>';
+            } else if (_maint.running) {
+                btns += '<button class="btn btn-ghost btn-sm" disabled style="opacity:.6">&#x23F3; Выполняется...</button>';
+            }
+            btns += '<button class="btn btn-ghost btn-sm" style="margin-left:auto;color:var(--error)" onclick="App.maintAbort()">'+
+                '<svg width="13" height="13" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2.5"><line x1="18" y1="6" x2="6" y2="18"/><line x1="6" y1="6" x2="18" y2="18"/></svg> Прервать</button>';
+            btns += '</div>';
+            el.innerHTML = bodyHtml + btns;
+        }
+
+        function maintRender() { maintRenderSteps(); maintRenderBody(); }
+
+        function maintDoAction(nodeId, action) {
+            return fetch(getApiBase()+'/api/node/'+nodeId+'/action', {
+                method:'POST', headers:{'Content-Type':'application/json'},
+                body: JSON.stringify({action:action}),
+            }).then(function(r){ return r.json(); });
+        }
+
+        function maintPollSst(nodeId) {
+            return fetch(getApiBase()+'/api/node/'+nodeId+'/sst-status')
+                .then(function(r){ return r.json(); });
+        }
+
+        function maintStartPoll(nodeId, condFn, onSuccess, onTimeout, maxSec) {
+            maxSec = maxSec||180;
+            var elapsed=0, iv=3000;
+            var bar=document.getElementById('maintPollBar'), fill=document.getElementById('maintPollFill');
+            if (bar) bar.style.display='block';
+            _maint.pollTimer = setInterval(function(){
+                if (_maint.aborted) { clearInterval(_maint.pollTimer); return; }
+                elapsed += iv/1000;
+                if (fill) fill.style.width = Math.min((elapsed/maxSec)*100,98)+'%';
+                maintPollSst(nodeId).then(function(d){
+                    if (condFn(d)) {
+                        clearInterval(_maint.pollTimer);
+                        if (fill) fill.style.width='100%';
+                        setTimeout(function(){ if(bar) bar.style.display='none'; if(fill) fill.style.width='0%'; },600);
+                        onSuccess(d);
+                    } else if (elapsed>=maxSec) {
+                        clearInterval(_maint.pollTimer);
+                        if (bar) bar.style.display='none';
+                        onTimeout();
+                    }
+                }).catch(function(){});
+            }, iv);
+        }
+
+        function maintInitNode(nodeId) {
+            if (_maint.pollTimer) clearInterval(_maint.pollTimer);
+            _maint.nodeId=nodeId; _maint.stepIdx=0; _maint.running=false; _maint.aborted=false; _maint.logLines=[];
+            var logEl=document.getElementById('maintLog');
+            if (logEl) { logEl.style.display='none'; logEl.innerHTML=''; }
+            var bar=document.getElementById('maintPollBar'); if(bar) bar.style.display='none';
+            var rb=document.getElementById('maintResetBtn'); if(rb) rb.style.display='inline-flex';
+            maintLog('Wizard инициализирован для ноды: '+nodeId, 'wl-info');
+            maintRender();
+        }
+
+        function maintExecuteStep() {
+            var step = MAINT_STEPS[_maint.stepIdx];
+            if (!step||!step.action) return;
+            _maint.running=true; maintRender();
+            maintLog('-> '+step.action+' на '+_maint.nodeId, 'wl-info');
+            maintDoAction(_maint.nodeId, step.action).then(function(res){
+                if (res.ok) {
+                    maintLog('OK: '+step.action+(res.stdout?': '+res.stdout.substring(0,80):''), 'wl-ok');
+                    _maint.running=false; _maint.stepIdx++;
+                    maintRender();
+                    var nextStep = MAINT_STEPS[_maint.stepIdx];
+                    if (nextStep && nextStep.wait && nextStep.wait!=='manual_confirm') { maintStartWait(); }
+                } else {
+                    maintLog('FAIL: '+step.action+': '+(res.stderr||res.detail||JSON.stringify(res)), 'wl-err');
+                    _maint.running=false; maintRender();
+                }
+            }).catch(function(e){ maintLog('ERR: '+e.message,'wl-err'); _maint.running=false; maintRender(); });
+        }
+
+        function maintStartWait() {
+            var step = MAINT_STEPS[_maint.stepIdx];
+            if (!step||!step.wait||step.wait==='manual_confirm') return;
+            _maint.running=true; maintRender();
+            if (step.wait==='recv_queue_zero') {
+                maintLog('Waiting recv_queue = 0...','wl-wait');
+                maintStartPoll(_maint.nodeId,
+                    function(d){ return parseInt(d.recv_queue||0)===0 && d.state!=='unknown'; },
+                    function(){ maintLog('OK: recv_queue=0','wl-ok'); _maint.running=false; _maint.stepIdx++; maintRender(); },
+                    function(){ maintLog('TIMEOUT recv_queue. Продолжите вручную.','wl-err'); _maint.running=false; maintRender(); },
+                    120);
+            } else if (step.wait==='state_synced') {
+                maintLog('Waiting Synced...','wl-wait');
+                maintStartPoll(_maint.nodeId,
+                    function(d){ return d.state==='Synced'; },
+                    function(){ maintLog('OK: Synced','wl-ok'); _maint.running=false; _maint.stepIdx++; maintRender(); },
+                    function(){ maintLog('TIMEOUT Synced. Проверьте ноду вручную.','wl-err'); _maint.running=false; maintRender(); },
+                    300);
+            }
+        }
+
+        function renderMaintNodeSelect() {
+            var sel = document.getElementById('maintNodeSelect');
+            if (!sel) return;
+            var prev = _maint.nodeId || sel.value;
+            var opts = '<option value="">— выберите ноду —</option>';
+            (clusterData.nodes||[]).forEach(function(nd){
+                opts += '<option value="'+nd.id+'"'+(nd.id===prev?' selected':'')+'>'+(nd.name||nd.id)+' ('+(nd.host||'')+')</option>';
+            });
+            sel.innerHTML = opts;
+        }
+        // ════════════════════════════════════════════════════════════
+        // END MAINTENANCE WIZARD
+        // ════════════════════════════════════════════════════════════
 
         function startAutoRefresh() {
             if (_pollTimer) clearInterval(_pollTimer);

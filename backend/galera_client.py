@@ -69,6 +69,19 @@ def get_cluster_status(cfg: dict) -> dict:
                     }
         results = [ordered[n["id"]] for n in enabled_nodes]
 
+    # Обогащаем каждый result ssh/dc полями из nodes_cfg (они не приходят из wsrep-запроса)
+    _cfg_by_id = {n["id"]: n for n in enabled_nodes}
+    for r in results:
+        nid = r.get("id")
+        ncfg = _cfg_by_id.get(nid, {})
+        r.setdefault("ssh_port", ncfg.get("ssh_port", 22))
+        r.setdefault("ssh_user", ncfg.get("ssh_user", "root"))
+        r.setdefault("ssh_key",  ncfg.get("ssh_key",  "~/.ssh/id_rsa"))
+        if ncfg.get("dc"):
+            r.setdefault("dc", ncfg["dc"])
+        if ncfg.get("db_user"):
+            r.setdefault("db_user", ncfg["db_user"])
+
     synced    = sum(1 for r in results if r.get("wsrep_local_state_comment") == "Synced")
     online    = sum(1 for r in results if r.get("online"))
     primary   = all(r.get("wsrep_cluster_status") == "Primary" for r in results if r.get("online"))

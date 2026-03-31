@@ -49,18 +49,19 @@ def get_cluster_status(cfg: dict) -> dict:
     else:
         # Real — параллельный опрос всех нод одновременно
         from concurrent.futures import ThreadPoolExecutor, as_completed
-        futures = {}
-        with ThreadPoolExecutor(max_workers=len(enabled_nodes) or 1) as pool:
-            for n in enabled_nodes:
-                fut = pool.submit(_real_node_status, n, cfg)
-                futures[fut] = n["id"]
+        # futures = {}
+        #with ThreadPoolExecutor(max_workers=len(enabled_nodes) or 1) as pool:
+        #    for n in enabled_nodes:
+        #        fut = pool.submit(_real_node_status, n, cfg)
+        #        futures[fut] = n["id"]
         # Собираем в порядке исходного списка (не as_completed — сохраняем порядок)
         ordered = {n["id"]: None for n in enabled_nodes}
         with ThreadPoolExecutor(max_workers=len(enabled_nodes) or 1) as pool:
             fmap = {pool.submit(_real_node_status, n, cfg): n["id"] for n in enabled_nodes}
-            for fut, nid in fmap.items():
+            for fut in as_completed(fmap, timeout=12):   # ← as_completed: берём тех кто ответил первым
+                nid = fmap[fut]
                 try:
-                    ordered[nid] = fut.result(timeout=10)
+                    ordered[nid] = fut.result()
                 except Exception as e:
                     ordered[nid] = {
                         "id": nid, "name": nid, "host": "", "port": 3306,

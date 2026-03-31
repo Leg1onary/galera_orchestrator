@@ -2537,6 +2537,25 @@
                 body: JSON.stringify({ use_mock: mode === 'mock' })
             }).catch(function(){});
 
+            // B4: при переключении в Real подгрузить лог с бекенда
+            if (mode === 'real') {
+                var _apiB4 = getApiBase();
+                fetch(_apiB4 + '/api/log')
+                    .then(function(r) { return r.json(); })
+                    .then(function(data) {
+                        var entries = (data && data.entries) ? data.entries : [];
+                        var added = 0;
+                        entries.forEach(function(e) {
+                            var t = e.timestamp ? e.timestamp.slice(11,19) : '--:--:--';
+                            logLines.push({ time: t, level: (e.level || 'INFO').toUpperCase(), msg: e.message || e.msg || '' });
+                            added++;
+                        });
+                        if (logLines.length > 200) logLines = logLines.slice(-200);
+                        if (added) renderLog();
+                    })
+                    .catch(function() {});
+            }
+
             startAutoRefresh();
 
             if (mode === 'real') { fetchRealData(); } else { renderAll(); }
@@ -2631,7 +2650,13 @@
                         msg:   'Сервис будет перезапущен. Кратковременный выход из кластера.',
                         icon:  '🔄', ok: 'btn-warning' },
                     rejoin:  { title: 'Rejoin ноды ' + node.name + '?',
-                        msg:   'systemctl restart mariadb.service — нода переподключится через IST/SST.',
+                        msg:   'systemctl restart mariadb.service — нода переподключится через IST/SST.<br><br>' +
+                            '<label style="font-size:var(--text-sm);font-weight:600;display:block;margin-bottom:6px">Метод синхронизации:</label>' +
+                            '<select id="rejoinMethodCard" class="form-input" style="width:100%;margin-bottom:4px">' +
+                            '<option value="auto">Авто (SST если нужно)</option>' +
+                            '<option value="ist">Только IST</option>' +
+                            '<option value="sst">Принудительный SST</option>' +
+                            '</select>',
                         icon:  '🔗', ok: 'btn-primary' },
                     start:   { title: 'Start MariaDB на ' + node.name + '?',
                         msg:   'Запустить сервис и присоединиться к кластеру.',
@@ -2646,15 +2671,21 @@
                         var apiBase = getApiBase();
                         node.state = (action === 'stop') ? 'Offline' : 'Joiner';
                         renderAll();
+                        var _actionBody = { action: action };
+                        if (action === 'rejoin') {
+                            var _mCard = document.getElementById('rejoinMethodCard');
+                            _actionBody.method = _mCard ? _mCard.value : 'auto';
+                        }
                         fetch(apiBase + '/api/node/' + nodeId + '/action', {
                             method: 'POST',
                             headers: { 'Content-Type': 'application/json' },
-                            body: JSON.stringify({ action: action })
+                            body: JSON.stringify(_actionBody)
                         })
                             .then(function(r) { return r.json(); })
                             .then(function(res) {
                                 var lvl = res.ok ? 'OK' : 'ERROR';
-                                addLog(lvl, node.name + ': ' + action + ' → exit=' + res.exit_code + (res.stderr ? ' | ' + res.stderr : ''));
+                                var _mUsed = (action === 'rejoin' && _actionBody.method) ? ' [' + _actionBody.method + ']' : '';
+                                addLog(lvl, node.name + ': ' + action + _mUsed + ' → exit=' + res.exit_code + (res.stderr ? ' | ' + res.stderr : ''));
                                 toast(res.ok ? 'success' : 'error', node.name + ': ' + action + (res.ok ? ' ✓' : ' ✗'));
                                 setTimeout(fetchRealData, 1500);
                             })
@@ -3365,6 +3396,49 @@
                     })
                     .catch(function() {});
             }
+
+            // B4: загрузить последние события с бекенда в Real-режиме
+            function fetchBackendLog() {
+                fetch(apiBase + '/api/log')
+                    .then(function(r) { return r.json(); })
+                    .then(function(data) {
+                        var entries = (data && data.entries) ? data.entries : [];
+                        if (!entries.length) return;
+                        // Добавляем только те записи которых ещё нет в logLines (по времени+msg)
+                        var existingMsgs = new Set(logLines.map(function(l){ return l.time + l.msg; }));
+                        var added = 0;
+                        entries.forEach(function(e) {
+                            var t = e.timestamp ? e.timestamp.slice(11,19) : '--:--:--';
+                            var key = t + (e.message || e.msg || '');
+                            if (!existingMsgs.has(key)) {
+                                logLines.push({ time: t, level: (e.level || 'INFO').toUpperCase(), msg: e.message || e.msg || '' });
+                                added++;
+                            }
+                        });
+                        if (logLines.length > 200) logLines = logLines.slice(-200);
+                        if (added > 0) {
+                            renderLog();
+                            addLog('INFO', 'Загружено ' + added + ' событий из бекенда');
+                        }
+                    })
+                    .catch(function() {});
+            }
+            if (_dataMode === 'real') fetchBackendLog();
+
+            // B2: восстановить сценарий mock при F5
+            fetch(apiBase + '/api/scenario')
+                .then(function(r) { return r.json(); })
+                .then(function(data) {
+                    var scn = data.scenario || 'normal';
+                    var sel = document.getElementById('scenarioSelect');
+                    if (sel && scn !== 'normal') {
+                        sel.value = scn;
+                        // применяем сценарий к mock данным без POST обратно
+                        if (scenarios[scn]) { scenarios['normal'](); scenarios[scn](); renderAll(); }
+                        addLog('INFO', 'Сценарий восстановлен из бекенда: ' + scn);
+                    }
+                })
+                .catch(function() {});
 
             // Загрузить cluster/db/settings + dc из /api/config для YAML preview
             fetch(apiBase + '/api/config')

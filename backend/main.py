@@ -39,14 +39,25 @@ _prev_status: dict = {}
 
 
 def _push_event(level: str, message: str, source: str = "system"):
+    """Alias — delegates to _push_event_ws once WS manager is available."""
     entry = {
-        "ts": datetime.now().strftime("%Y-%m-%d %H:%M:%S"),
-        "level": level.upper(),
+        "ts":     datetime.now().strftime("%Y-%m-%d %H:%M:%S"),
+        "level":  level.upper(),
         "message": message,
         "source": source,
     }
     _event_log.appendleft(entry)
-    getattr(log, level.lower(), log.info)("[%s] %s", source, message)
+    getattr(log, level.lower() if level.lower() in ("debug","info","warning","error","critical") else "info",
+            log.info)("[%s] %s", source, message)
+    # Broadcast via WebSocket if manager is ready (lazy reference)
+    try:
+        mgr = globals().get("_ws_manager")
+        if mgr is not None:
+            loop = asyncio.get_event_loop()
+            if loop.is_running():
+                asyncio.ensure_future(mgr.broadcast({"type": "event", **entry}))
+    except Exception:
+        pass
 
 
 @asynccontextmanager
@@ -867,18 +878,77 @@ async def diagnostics_check_all():
     return {"results": results, "all_ok": all_ok, "checked_at": time.strftime("%H:%M:%S")}
 
 
+# ── WEBSOCKET MANAGER ─────────────────────────────────────────
+class _WsManager:
+    def __init__(self):
+        self._clients: list[WebSocket] = []
+        self._lock = asyncio.Lock()
+
+    async def connect(self, ws: WebSocket):
+        await ws.accept()
+        async with self._lock:
+            self._clients.append(ws)
+
+    async def disconnect(self, ws: WebSocket):
+        async with self._lock:
+            try: self._clients.remove(ws)
+            except ValueError: pass
+
+    async def broadcast(self, payload: dict):
+        msg = json.dumps(payload, ensure_ascii=False, default=str)
+        dead = []
+        async with self._lock:
+            clients = list(self._clients)
+        for ws in clients:
+            try:
+                await ws.send_text(msg)
+            except Exception:
+                dead.append(ws)
+        for ws in dead:
+            await self.disconnect(ws)
+
+    @property
+    def count(self):
+        return len(self._clients)
+
+_ws_manager = _WsManager()
+
+
+
+
+
 @app.websocket("/ws/cluster")
 async def ws_cluster(ws: WebSocket):
-    await ws.accept()
+    """Main cluster WebSocket: sends status on interval + events in real time."""
+    await _ws_manager.connect(ws)
     try:
+        # Send initial status immediately
+        cfg  = load_config()
+        data = get_cluster_status(cfg)
+        await ws.send_text(json.dumps({"type": "status", **data}, default=str))
+
         while True:
-            cfg  = load_config()
-            data = get_cluster_status(cfg)
-            await ws.send_text(json.dumps(data))
+            cfg      = load_config()
             interval = cfg.get("settings", {}).get("poll_interval", 5)
-            await asyncio.sleep(interval)
+            # Wait for interval or until client sends a ping/message
+            try:
+                text = await asyncio.wait_for(ws.receive_text(), timeout=float(interval))
+                if text == "ping":
+                    await ws.send_text(json.dumps({"type": "pong"}))
+            except asyncio.TimeoutError:
+                pass  # Normal — just poll
+            except Exception:
+                break
+
+            data = get_cluster_status(cfg)
+            await ws.send_text(json.dumps({"type": "status", **data}, default=str))
+
     except WebSocketDisconnect:
         pass
+    except Exception:
+        pass
+    finally:
+        await _ws_manager.disconnect(ws)
 
 if __name__ == "__main__":
     import uvicorn

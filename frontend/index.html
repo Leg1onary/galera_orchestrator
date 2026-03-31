@@ -990,6 +990,7 @@
                     Обновить
                 </button>
                 <span class="spin-dot" id="loadingDot" style="display:none"></span>
+                <span id="wsIndicator" title="WebSocket" style="display:none;width:8px;height:8px;border-radius:50%;background:var(--color-text-faint);flex-shrink:0;transition:background 0.3s"></span>
                 <span id="lastUpdateTime" style="font-size:0.72rem;color:var(--color-text)">—</span>
             </div>
         </div>
@@ -2069,6 +2070,184 @@
             var custom = el ? el.value.trim().replace(/\/+$/, '') : '';
             return custom || (window.location.protocol + '//' + window.location.host);
         }
+        // ═══════════════════════════════════════════════════
+        // WsManager — WebSocket с авто-реконнектом и fallback
+        // ═══════════════════════════════════════════════════
+        var WsManager = (function() {
+            var _ws          = null;
+            var _reconnectMs = 1000;   // начальная задержка реконнекта
+            var _maxRecoMs   = 30000;  // максимальная задержка
+            var _reconnTimer = null;
+            var _active      = false;  // true когда WS режим включён
+            var _indicator   = null;
+
+            function _getWsUrl() {
+                var base = getApiBase();
+                var wsBase = base.replace(/^http/, 'ws');
+                return wsBase + '/ws/cluster';
+            }
+
+            function _setIndicator(state) {
+                if (!_indicator) _indicator = document.getElementById('wsIndicator');
+                if (!_indicator) return;
+                _indicator.style.display = 'inline-block';
+                var colors = { connected: 'var(--color-success)', connecting: 'var(--color-warning)', error: 'var(--color-error)', off: 'var(--color-text-faint)' };
+                _indicator.style.background = colors[state] || colors.off;
+                _indicator.title = 'WebSocket: ' + state;
+            }
+
+            function _onMessage(evt) {
+                try {
+                    var msg = JSON.parse(evt.data);
+                    if (!msg || !msg.type) return;
+
+                    if (msg.type === 'status') {
+                        // Обновляем clusterData из WS-сообщения (аналог fetchRealData)
+                        var rawNodes = msg.nodes || [];
+                        clusterData.nodes = rawNodes.map(function(nd) {
+                            var state = nd.wsrep_local_state_comment || (nd.online === false ? 'Offline' : 'Unknown');
+                            return {
+                                id: nd.id || nd.name, name: nd.name || nd.id,
+                                host: nd.host || '', port: nd.port || 3306,
+                                ssh_port: nd.ssh_port || 22,
+                                online: nd.online !== false, error: nd.error || null, state: state,
+                                metrics: {
+                                    wsrep_cluster_status:      nd.wsrep_cluster_status || '—',
+                                    wsrep_cluster_size:        String(nd.wsrep_cluster_size || '0'),
+                                    wsrep_connected:           nd.wsrep_connected || 'OFF',
+                                    wsrep_ready:               nd.wsrep_ready || 'OFF',
+                                    wsrep_local_state_comment: state,
+                                    wsrep_local_recv_queue:    String(nd.wsrep_local_recv_queue || '0'),
+                                    wsrep_local_send_queue:    String(nd.wsrep_local_send_queue || '0'),
+                                    wsrep_flow_control_paused: String(nd.wsrep_flow_control_paused || '0.000'),
+                                    wsrep_cert_deps_distance:  String(nd.wsrep_cert_deps_distance || '0.00'),
+                                    wsrep_last_committed:      String(nd.wsrep_last_committed || nd.wsrep_local_commits || '0'),
+                                    wsrep_local_cert_failures: String(nd.wsrep_local_cert_failures || '0'),
+                                    wsrep_bf_aborts:           String(nd.wsrep_bf_aborts || '0'),
+                                    wsrep_cluster_conf_id:     String(nd.wsrep_cluster_conf_id || '0'),
+                                    wsrep_cluster_state_uuid:  nd.wsrep_cluster_state_uuid || '—',
+                                    wsrep_replicated_bytes:    nd.wsrep_replicated_bytes || '—',
+                                    wsrep_received_bytes:      nd.wsrep_received_bytes || '—',
+                                },
+                                read_only: nd.read_only || false,
+                                sst_progress: nd.sst_progress || 0,
+                                sst_method: nd.sst_method || null,
+                            };
+                        });
+                        if (msg.arbitrators) clusterData.arbitrators = msg.arbitrators;
+                        _mergeConfigNodes();
+                        if (msg.cluster_name || msg.environment) {
+                            clusterData.cluster = clusterData.cluster || {};
+                            if (msg.cluster_name) clusterData.cluster.name = msg.cluster_name;
+                            if (msg.environment)  clusterData.cluster.environment = msg.environment;
+                        }
+                        clusterData.timestamp = new Date();
+                        _lastUpdateStr = clusterData.timestamp.toLocaleTimeString('ru-RU');
+                        _tickCount++;
+                        renderAll();
+
+                    } else if (msg.type === 'event') {
+                        // Серверное событие — добавляем в лог
+                        var t = (msg.ts || '').slice(11,19) || new Date().toLocaleTimeString('ru-RU');
+                        addLog(msg.level || 'INFO', '[WS] ' + (msg.message || ''));
+                    } else if (msg.type === 'pong') {
+                        // heartbeat ответ — ок
+                    }
+                } catch(e) {
+                    // invalid JSON — ignore
+                }
+            }
+
+            function connect() {
+                if (!_active) return;
+                if (_ws && (_ws.readyState === WebSocket.CONNECTING || _ws.readyState === WebSocket.OPEN)) return;
+
+                _setIndicator('connecting');
+                var url = _getWsUrl();
+
+                try {
+                    _ws = new WebSocket(url);
+                } catch(e) {
+                    _fallback('WS create error: ' + e.message);
+                    return;
+                }
+
+                _ws.onopen = function() {
+                    _reconnectMs = 1000;  // сброс задержки
+                    _setIndicator('connected');
+                    addLog('INFO', 'WebSocket подключён: ' + url);
+                    // Останавливаем polling setInterval
+                    if (_pollTimer) { clearInterval(_pollTimer); _pollTimer = null; }
+                    // Запускаем heartbeat ping каждые 20 сек
+                    _startHeartbeat();
+                };
+
+                _ws.onmessage = _onMessage;
+
+                _ws.onerror = function(e) {
+                    _setIndicator('error');
+                };
+
+                _ws.onclose = function(evt) {
+                    _stopHeartbeat();
+                    if (!_active) {
+                        _setIndicator('off');
+                        return;
+                    }
+                    _setIndicator('error');
+                    addLog('WARN', 'WebSocket отключён (code=' + evt.code + '). Реконнект через ' + (_reconnectMs/1000) + 'с...');
+                    // Запускаем polling пока WS переподключается
+                    if (!_pollTimer) startAutoRefresh();
+                    _reconnTimer = setTimeout(function() {
+                        connect();
+                    }, _reconnectMs);
+                    _reconnectMs = Math.min(_reconnectMs * 2, _maxRecoMs);
+                };
+            }
+
+            var _hbTimer = null;
+            function _startHeartbeat() {
+                _stopHeartbeat();
+                _hbTimer = setInterval(function() {
+                    if (_ws && _ws.readyState === WebSocket.OPEN) {
+                        _ws.send('ping');
+                    }
+                }, 20000);
+            }
+            function _stopHeartbeat() {
+                if (_hbTimer) { clearInterval(_hbTimer); _hbTimer = null; }
+            }
+
+            function _fallback(reason) {
+                addLog('WARN', 'WS недоступен (' + reason + ') — fallback на HTTP polling');
+                _setIndicator('error');
+                _active = false;
+                if (!_pollTimer) startAutoRefresh();
+            }
+
+            function enable() {
+                _active = true;
+                connect();
+            }
+
+            function disable() {
+                _active = false;
+                _stopHeartbeat();
+                if (_reconnTimer) { clearTimeout(_reconnTimer); _reconnTimer = null; }
+                if (_ws) { try { _ws.close(1000, 'disabled'); } catch(e){} _ws = null; }
+                _setIndicator('off');
+                // Возвращаем polling
+                startAutoRefresh();
+            }
+
+            function isConnected() {
+                return _ws && _ws.readyState === WebSocket.OPEN;
+            }
+
+            return { enable: enable, disable: disable, connect: connect, isConnected: isConnected };
+        })();
+
+
 
         // ---- THEME ----
         var themeEl = document.documentElement;
@@ -2655,7 +2834,10 @@
             var _envLabel = _env === 'prod' ? 'PROD' : 'TEST';
             if (text) text.textContent = _envLabel + ' · ' + (n0.wsrep_cluster_status || '—') + ' · ' + synced + '/' + clusterData.nodes.length + _arbHStr;
             var lu = document.getElementById('lastUpdateTime');
-            if (lu && _lastUpdateStr) lu.textContent = _lastUpdateStr;
+            if (lu && _lastUpdateStr) {
+                var wsLabel = (WsManager && WsManager.isConnected()) ? ' [WS]' : '';
+                lu.textContent = _lastUpdateStr + wsLabel;
+            }
         }
 
         // ---- BOOTSTRAP CANDIDATES ----
@@ -3012,9 +3194,15 @@
                     .catch(function() {});
             }
 
-            startAutoRefresh();
-
-            if (mode === 'real') { fetchRealData(); } else { renderAll(); }
+            // WS: в Real-режиме включаем WS (заменяет polling);
+            //     в Mock-режиме WS не нужен — используем setInterval
+            if (mode === 'real') {
+                WsManager.enable();           // включает WS, останавливает polling
+                fetchRealData();              // мгновенный первый запрос пока WS коннектится
+            } else {
+                WsManager.disable();          // выключает WS, возвращает polling
+                renderAll();
+            }
         }
 
         function applyEnv(env) {

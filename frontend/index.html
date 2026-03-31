@@ -1197,13 +1197,23 @@
                 </div>
             </div>
 
-            <!-- Arbitrator — виден только в PROD-контуре -->
-            <div class="form-section" id="arbitratorSection" style="display:none">
+            <!-- Arbitrators — visible for TEST and PROD -->
+            <div class="form-section" id="arbitratorSection">
                 <div class="form-section-title">
                     <svg width="20" height="20" viewBox="0 0 24 24" fill="none" stroke="var(--warning)" stroke-width="2"><polygon points="12 2 15.09 8.26 22 9.27 17 14.14 18.18 21.02 12 17.77 5.82 21.02 7 14.14 2 9.27 8.91 8.26 12 2"/></svg>
-                    Арбитр (garbd) — PROD-контур
+                    Арбитры (garbd)
                 </div>
+                <p style="font-size:var(--text-sm);color:var(--text-muted);margin-bottom:var(--space-4)">
+                    По одному арбитру на каждый ДЦ. Участвует в кворуме, но не хранит данные.
+                    Рекомендуется при чётном числе нод данных.
+                </p>
                 <div id="arbitratorBlock"></div>
+                <div style="margin-top:var(--space-4)">
+                    <button class="btn btn-primary" onclick="App.openAddArbitratorModal()">
+                        <svg width="16" height="16" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2.5"><line x1="12" y1="5" x2="12" y2="19"/><line x1="5" y1="12" x2="19" y2="12"/></svg>
+                        Добавить арбитр
+                    </button>
+                </div>
             </div>
 
             <!-- DB credentials -->
@@ -1456,6 +1466,15 @@
         </div>
         <div class="form-row">
             <div class="form-group">
+                <label class="form-label">Датацентр (DC)</label>
+                <input class="form-input" type="text" id="newNodeDc" value="DC1" placeholder="DC1">
+            </div>
+            <div class="form-group" style="display:flex;align-items:flex-end">
+                <p class="form-hint">Например: DC1, DC2, MSK, SPB</p>
+            </div>
+        </div>
+        <div class="form-row">
+            <div class="form-group">
                 <label class="form-label">DB пользователь <span>опц.</span></label>
                 <input class="form-input" type="text" id="newNodeDbUser" placeholder="оставить пустым = глобальный">
             </div>
@@ -1551,6 +1570,18 @@
             <div class="form-group">
                 <label class="form-label">SSH порт</label>
                 <input class="form-input" type="number" id="arbSsh" value="22">
+            </div>
+        </div>
+        <div class="form-row">
+            <div class="form-group">
+                <label class="form-label">Датацентр (DC)</label>
+                <input class="form-input" type="text" id="arbDc" value="DC1" placeholder="DC1">
+                <p class="form-hint">Например: DC1, DC2, MSK, SPB</p>
+            </div>
+            <div class="form-group">
+                <label class="form-label">ID арбитра <span>опц.</span></label>
+                <input class="form-input" type="text" id="arbId" placeholder="arb01 (авто)">
+                <p class="form-hint">Пусто — назначится автоматически</p>
             </div>
         </div>
         <div class="form-group">
@@ -1680,7 +1711,8 @@
                     }
                 }
             ],
-            arbitrator: null
+            arbitrator: null,
+            arbitrators: [],
         };
 
         function makeMockData() {
@@ -2099,62 +2131,137 @@
                 el.innerHTML = '<p style="color:var(--text-muted);font-size:var(--text-sm);padding:var(--space-4) 0">Ноды не добавлены</p>';
                 return;
             }
-            el.innerHTML = clusterData.nodes.map(function(node) {
-                // P0 guard: node.ssh может быть undefined (от Real API приходит ssh_port)
+            var dcMap = {};
+            clusterData.nodes.forEach(function(node) {
+                var dc = node.dc || '';
+                if (!dcMap[dc]) dcMap[dc] = [];
+                dcMap[dc].push(node);
+            });
+            var dcKeys = Object.keys(dcMap).sort();
+            var multiDc = dcKeys.length > 1 || (dcKeys.length === 1 && dcKeys[0] !== '');
+            function _nodeRow(node, indent) {
                 var sshPort = node.ssh || node.ssh_port || 22;
-                return '<div class="node-list-item">' +
+                var dcBadge = node.dc ? '<span style="font-size:var(--text-xs);background:var(--primary-dim);color:var(--primary);padding:2px 7px;border-radius:9999px;font-weight:600;margin-right:4px">' + node.dc + '</span>' : '';
+                var leftBorder = indent ? 'border-left:3px solid var(--primary);margin-left:var(--space-2)' : '';
+                return '<div class="node-list-item" style="' + leftBorder + '">' +
                     '<div class="nli-info">' +
                     '<div class="nli-name">' + node.name + '</div>' +
                     '<div class="nli-host">' + (node.host || '') + ':' + (node.port || 3306) + ' · SSH :' + sshPort + '</div>' +
                     '</div>' +
+                    (multiDc ? '' : dcBadge) +
                     '<span class="nli-role-badge badge-synced" style="font-size:var(--text-xs)">Node</span>' +
                     '<button class="btn btn-ghost btn-sm" onclick="App.editNode(\'' + node.id + '\')">Изменить</button>' +
                     '<button class="btn btn-danger btn-sm" onclick="App.removeNode(\'' + node.id + '\')">Удалить</button>' +
                     '</div>';
-            }).join('');
+            }
+            if (!multiDc) {
+                el.innerHTML = clusterData.nodes.map(function(n){ return _nodeRow(n, false); }).join('');
+            } else {
+                el.innerHTML = dcKeys.map(function(dc) {
+                    var rows = dcMap[dc].map(function(n){ return _nodeRow(n, true); }).join('');
+                    var label = dc || 'Без ДЦ';
+                    return '<div style="margin-bottom:var(--space-4)">' +
+                        '<div style="font-size:var(--text-xs);font-weight:700;text-transform:uppercase;letter-spacing:.08em;' +
+                        'color:var(--primary);padding:var(--space-2) 0 var(--space-2) var(--space-3);' +
+                        'border-bottom:1px solid var(--border);margin-bottom:var(--space-2)">' +
+                        '<svg width="13" height="13" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2.5" ' +
+                        'style="display:inline;vertical-align:middle;margin-right:4px">' +
+                        '<path d="M3 9l9-7 9 7v11a2 2 0 0 1-2 2H5a2 2 0 0 1-2-2z"/></svg>' +
+                        label + ' — ' + dcMap[dc].length + ' ' + (dcMap[dc].length === 1 ? 'нода' : 'ноды') +
+                        '</div>' + rows + '</div>';
+                }).join('');
+            }
         }
 
         function renderArbitratorBlock() {
             var el = document.getElementById('arbitratorBlock');
             if (!el) return;
-            if (clusterData.arbitrator) {
-                // P1 guard: backend возвращает ssh_port, фронт хранит ssh
-                var arbSsh = clusterData.arbitrator.ssh || clusterData.arbitrator.ssh_port || 22;
-                el.innerHTML = '<div class="node-list-item">' +
-                    '<div class="nli-info">' +
-                    '<div class="nli-name">garbd</div>' +
-                    '<div class="nli-host">' + (clusterData.arbitrator.host || '') + ' · SSH :' + arbSsh + '</div>' +
-                    '</div>' +
-                    '<span class="nli-role-badge" style="background:var(--warning-dim);color:var(--warning);font-size:var(--text-xs);padding:2px 8px;border-radius:9999px;font-weight:700">Arbitrator</span>' +
-                    '<button class="btn btn-danger btn-sm" onclick="App.removeArbitrator()">Удалить арбитр</button>' +
-                    '</div>' +
-                    '<p class="form-hint" style="margin-top:var(--space-3)">Арбитр добавлен. Для prod-контура рекомендуется держать garbd на отдельной ВМ.</p>';
-            } else {
-                el.innerHTML = '<div style="text-align:center;padding:var(--space-8);color:var(--text-muted)">' +
-                    '<svg width="40" height="40" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="1.5" style="margin:0 auto var(--space-4)"><polygon points="12 2 15.09 8.26 22 9.27 17 14.14 18.18 21.02 12 17.77 5.82 21.02 7 14.14 2 9.27 8.91 8.26 12 2"/></svg>' +
-                    '<p style="font-size:var(--text-sm);margin-bottom:var(--space-4)">Арбитр не настроен.<br>Для тестового контура (2 ноды) не обязателен.<br>Для prod-контура — рекомендуется.</p>' +
-                    '<button class="btn btn-primary" onclick="App.openAddArbitratorModal()">Добавить арбитр (garbd)</button>' +
-                    '</div>';
+            var arbs = clusterData.arbitrators && clusterData.arbitrators.length
+                ? clusterData.arbitrators
+                : (clusterData.arbitrator ? [clusterData.arbitrator] : []);
+            if (!arbs.length) {
+                el.innerHTML = '<div style="padding:var(--space-5) 0;color:var(--text-muted);font-size:var(--text-sm)">Арбитры не настроены.</div>';
+                return;
             }
+            var dcArbMap = {};
+            arbs.forEach(function(a) { var dc = a.dc || 'DC1'; if (!dcArbMap[dc]) dcArbMap[dc] = []; dcArbMap[dc].push(a); });
+            var dcKeys = Object.keys(dcArbMap).sort();
+            var multiDc = dcKeys.length > 1;
+            el.innerHTML = dcKeys.map(function(dc) {
+                var rows = dcArbMap[dc].map(function(arb) {
+                    var arbId = arb.id || 'arb'; var arbSsh = arb.ssh || arb.ssh_port || 22;
+                    return '<div class="node-list-item" style="border-left:3px solid var(--warning);' + (multiDc ? 'margin-left:var(--space-2)' : '') + '">' +
+                        '<div class="nli-info">' +
+                        '<div class="nli-name">garbd · ' + arbId + '</div>' +
+                        '<div class="nli-host">' + (arb.host || '') + ' · SSH :' + arbSsh + '</div>' +
+                        '</div>' +
+                        '<span class="nli-role-badge" style="background:var(--warning-dim);color:var(--warning);font-size:var(--text-xs);padding:2px 8px;border-radius:9999px;font-weight:700">Arbitrator</span>' +
+                        '<button class="btn btn-danger btn-sm" onclick="App.removeArbitrator(\'' + arbId + '\')">Удалить</button>' +
+                        '</div>';
+                }).join('');
+                if (!multiDc) return rows;
+                return '<div style="margin-bottom:var(--space-3)">' +
+                    '<div style="font-size:var(--text-xs);font-weight:700;text-transform:uppercase;letter-spacing:.08em;' +
+                    'color:var(--warning);padding:var(--space-2) 0 var(--space-2) var(--space-3);border-bottom:1px solid var(--border);margin-bottom:var(--space-2)">' +
+                    '<svg width="13" height="13" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2.5" style="display:inline;vertical-align:middle;margin-right:4px">' +
+                    '<path d="M3 9l9-7 9 7v11a2 2 0 0 1-2 2H5a2 2 0 0 1-2-2z"/></svg>' +
+                    dc + '</div>' + rows + '</div>';
+            }).join('');
         }
 
         function renderYamlPreview() {
             var el = document.getElementById('yamlPreview');
             if (!el) return;
-            var yaml = 'cluster:\n  name: galera_cluster\n  contour: test\n\nnodes:\n';
+            // Читаем актуальные данные из clusterData + cfg (из /api/config)
+            var clName = (clusterData.cluster && clusterData.cluster.name) || 'galera_cluster';
+            var clEnv  = (clusterData.cluster && (clusterData.cluster.environment || clusterData.cluster.contour)) || 'test';
+            var yaml = 'cluster:\n  name: ' + clName + '\n  environment: ' + clEnv + '\n\nnodes:\n';
             clusterData.nodes.forEach(function(n) {
-                yaml += '  - name: ' + n.name + '\n' +
-                    '    host: ' + n.host + '\n' +
-                    '    port: ' + n.port + '\n' +
-                    '    ssh_port: ' + n.ssh + '\n' +
-                    '    role: node\n';
+                var sshPort = n.ssh_port || n.ssh || 22;
+                var sshUser = n.ssh_user || 'root';
+                var sshKey  = n.ssh_key  || '~/.ssh/id_rsa';
+                var dc      = n.dc ? '\n    dc: ' + n.dc : '';
+                var dbUser  = n.db_user ? '\n    db_user: ' + n.db_user : '';
+                yaml += '  - id: '       + n.id + '\n' +
+                    '    name: '         + n.name + '\n' +
+                    '    host: '         + n.host + '\n' +
+                    '    port: '         + (n.port || 3306) + '\n' +
+                    '    ssh_port: '     + sshPort + '\n' +
+                    '    ssh_user: '     + sshUser + '\n' +
+                    '    ssh_key: '      + sshKey  +
+                    dc + dbUser + '\n' +
+                    '    enabled: true\n';
             });
-            if (clusterData.arbitrator) {
-                yaml += '\narbitrator:\n' +
-                    '  host: ' + clusterData.arbitrator.host + '\n' +
-                    '  ssh_port: ' + clusterData.arbitrator.ssh + '\n' +
-                    '  cluster_name: ' + clusterData.arbitrator.cluster + '\n' +
-                    '  gcomm: "' + clusterData.arbitrator.gcomm + '"\n';
+            // Арбитры (новый формат — список)
+            var arbs = clusterData.arbitrators && clusterData.arbitrators.length
+                ? clusterData.arbitrators
+                : (clusterData.arbitrator && clusterData.arbitrator.host ? [clusterData.arbitrator] : []);
+            if (arbs.length > 0) {
+                yaml += '\narbitrators:\n';
+                arbs.forEach(function(a, i) {
+                    var arbId   = a.id  || ('arb' + (i+1).toString().padStart(2,'0'));
+                    var arbSsh  = a.ssh_port || a.ssh || 22;
+                    var arbUser = a.ssh_user || 'root';
+                    var arbKey  = a.ssh_key  || '~/.ssh/id_rsa';
+                    var arbDc   = a.dc ? '\n    dc: ' + a.dc : '';
+                    yaml += '  - id: '       + arbId + '\n' +
+                        '    host: '         + (a.host || '') + '\n' +
+                        '    ssh_port: '     + arbSsh + '\n' +
+                        '    ssh_user: '     + arbUser + '\n' +
+                        '    ssh_key: '      + arbKey  +
+                        arbDc + '\n' +
+                        '    enabled: true\n';
+                });
+            }
+            // DB глобальные credentials (если есть)
+            if (clusterData.db && (clusterData.db.user || clusterData.db.password)) {
+                yaml += '\ndb:\n  user: ' + (clusterData.db.user||'') + '\n  password: ' + (clusterData.db.password||'') + '\n';
+            }
+            // Settings
+            if (clusterData.settings) {
+                var poll = clusterData.settings.poll_interval || 10;
+                var mock = clusterData.settings.use_mock !== undefined ? clusterData.settings.use_mock : false;
+                yaml += '\nsettings:\n  poll_interval: ' + poll + '\n  use_mock: ' + mock + '\n';
             }
             el.textContent = yaml;
         }
@@ -2210,8 +2317,7 @@
             var bp = document.getElementById('btnEnvProd');
             if (bt) { bt.style.background = env === 'test' ? 'var(--primary)' : ''; bt.style.color = env === 'test' ? '#fff' : ''; }
             if (bp) { bp.style.background = env === 'prod' ? 'var(--primary)' : ''; bp.style.color = env === 'prod' ? '#fff' : ''; }
-            var arbS = document.getElementById('arbitratorSection');
-            if (arbS) arbS.style.display = env === 'prod' ? '' : 'none';
+            // arbitratorSection always visible (test + prod)
         }
 
         function applyMode(mode) {
@@ -2587,6 +2693,7 @@
                 var ssh     = parseInt(document.getElementById('newNodeSsh').value)  || 22;
                 var sshUser = document.getElementById('newNodeSshUser') ? document.getElementById('newNodeSshUser').value.trim() : 'root';
                 var sshKey  = document.getElementById('newNodeSshKey')  ? document.getElementById('newNodeSshKey').value.trim()  : '~/.ssh/id_rsa';
+                var dc      = document.getElementById('newNodeDc')      ? document.getElementById('newNodeDc').value.trim()          : 'DC1';
                 if (!name || !host) { toast('error', 'Заполните Имя и IP-адрес'); return; }
                 // Валидация IP/hostname
                 if (!/^[a-zA-Z0-9._-]+$/.test(host)) { toast('error', 'IP/hostname содержит недопустимые символы'); return; }
@@ -2790,49 +2897,62 @@
                 var ssh     = parseInt(document.getElementById('arbSsh').value) || 22;
                 var sshUser = document.getElementById('arbSshUser') ? document.getElementById('arbSshUser').value.trim() : 'root';
                 var sshKey  = document.getElementById('arbSshKey')  ? document.getElementById('arbSshKey').value.trim()  : '~/.ssh/id_rsa';
-                var cluster = document.getElementById('arbCluster') ? document.getElementById('arbCluster').value.trim() : '';
-                var gcomm   = document.getElementById('arbGcomm')   ? document.getElementById('arbGcomm').value.trim()   : '';
+                var dc      = document.getElementById('arbDc')      ? document.getElementById('arbDc').value.trim()      : 'DC1';
+                var arbId   = document.getElementById('arbId')      ? document.getElementById('arbId').value.trim()      : '';
                 if (!host) { toast('error', 'Укажите IP арбитра'); return; }
                 var apiBase = getApiBase();
+                var payload = { host: host, ssh_port: ssh, ssh_user: sshUser, ssh_key: sshKey, dc: dc };
+                if (arbId) payload.id = arbId;
                 fetch(apiBase + '/api/config/arbitrator', {
                     method: 'POST',
                     headers: { 'Content-Type': 'application/json' },
-                    body: JSON.stringify({ host: host, ssh_port: ssh, ssh_user: sshUser, ssh_key: sshKey })
+                    body: JSON.stringify(payload)
                 })
                 .then(function(r) { return r.json(); })
-                .then(function() {
-                    clusterData.arbitrator = { host: host, ssh: ssh, cluster: cluster, gcomm: gcomm, enabled: true };
+                .then(function(res) {
+                    if (!clusterData.arbitrators) clusterData.arbitrators = [];
+                    var newArb = { id: res.id || arbId || ('arb' + Date.now()), host: host, ssh: ssh, ssh_port: ssh, dc: dc, enabled: true };
+                    var idx = clusterData.arbitrators.findIndex(function(a){ return a.id === newArb.id; });
+                    if (idx >= 0) clusterData.arbitrators[idx] = newArb; else clusterData.arbitrators.push(newArb);
                     App.closeModal('addArbitratorModal');
                     renderAll();
-                    addLog('INFO', 'Арбитр сохранён в nodes.yaml: ' + host);
-                    toast('success', 'Арбитр garbd добавлен');
+                    addLog('INFO', 'Арбитр сохранён: ' + host + ' (' + dc + ')');
+                    toast('success', 'Арбитр garbd добавлен (' + dc + ')');
                 })
                 .catch(function(e) {
-                    clusterData.arbitrator = { host: host, ssh: ssh, cluster: cluster, gcomm: gcomm, enabled: true };
+                    if (!clusterData.arbitrators) clusterData.arbitrators = [];
+                    var newArb = { id: arbId || ('arb' + Date.now()), host: host, ssh: ssh, ssh_port: ssh, dc: dc, enabled: true };
+                    clusterData.arbitrators.push(newArb);
                     App.closeModal('addArbitratorModal');
                     renderAll();
                     addLog('WARN', 'Арбитр добавлен (API недоступен): ' + e.message);
-                    toast('success', 'Арбитр garbd добавлен (offline режим)');
+                    toast('success', 'Арбитр garbd добавлен (offline)');
                 });
             },
 
-            removeArbitrator: function() {
-                confirm('🗑️', 'Удалить арбитр?', 'garbd будет удалён из nodes.yaml.', 'btn-danger').then(function(ok) {
+            removeArbitrator: function(arbId) {
+                var label = arbId || 'арбитр';
+                confirm('🗑️', 'Удалить ' + label + '?', 'garbd будет удалён из nodes.yaml.', 'btn-danger').then(function(ok) {
                     if (!ok) return;
                     var apiBase = getApiBase();
-                    fetch(apiBase + '/api/config/arbitrator', { method: 'DELETE' })
+                    var url = arbId ? apiBase + '/api/config/arbitrator/' + arbId : apiBase + '/api/config/arbitrator';
+                    fetch(url, { method: 'DELETE' })
                         .then(function(r) { return r.json(); })
                         .then(function() {
-                            clusterData.arbitrator = null;
+                            if (arbId && clusterData.arbitrators) {
+                                clusterData.arbitrators = clusterData.arbitrators.filter(function(a){ return a.id !== arbId; });
+                            } else { clusterData.arbitrators = []; clusterData.arbitrator = null; }
                             renderAll();
-                            addLog('WARN', 'Арбитр удалён из nodes.yaml');
-                            toast('warning', 'Арбитр удалён');
+                            addLog('WARN', 'Арбитр удалён: ' + label);
+                            toast('warning', 'Арбитр ' + label + ' удалён');
                         })
                         .catch(function(e) {
-                            clusterData.arbitrator = null;
+                            if (arbId && clusterData.arbitrators) {
+                                clusterData.arbitrators = clusterData.arbitrators.filter(function(a){ return a.id !== arbId; });
+                            } else { clusterData.arbitrators = []; clusterData.arbitrator = null; }
                             renderAll();
-                            addLog('WARN', 'Арбитр удалён (API недоступен): ' + e.message);
-                            toast('warning', 'Арбитр удалён (offline режим)');
+                            addLog('WARN', 'Арбитр удалён (offline): ' + e.message);
+                            toast('warning', 'Арбитр удалён (offline)');
                         });
                 });
             },
@@ -2881,9 +3001,7 @@
             if (scnBlock)  scnBlock.style.display  = savedMode === 'mock' ? '' : 'none';
             if (realBadge) realBadge.style.display  = savedMode === 'real' ? 'flex' : 'none';
 
-            // Арбитр — секция только для PROD
-            var arbS = document.getElementById('arbitratorSection');
-            if (arbS) arbS.style.display = savedEnv === 'prod' ? '' : 'none';
+            // arbitratorSection always visible
         })();
 
         addLog('OK',   'Galera Orchestrator запущен');
@@ -2959,6 +3077,19 @@
                             }
                         };
                     });
+                    if (data.arbitrators) clusterData.arbitrators = data.arbitrators;
+                    // Sync cluster meta, ssh_info, settings from /api/status
+                    if (data.cluster_name || data.environment) {
+                        clusterData.cluster = clusterData.cluster || {};
+                        if (data.cluster_name) clusterData.cluster.name = data.cluster_name;
+                        if (data.environment)  clusterData.cluster.environment = data.environment;
+                    }
+                    if (data.settings) {
+                        clusterData.settings = data.settings;
+                    }
+                    if (data.db) {
+                        clusterData.db = data.db;
+                    }
                     clusterData.timestamp = new Date();
                     _lastUpdateStr = clusterData.timestamp.toLocaleTimeString('ru-RU');
                     _tickCount++;
@@ -3019,6 +3150,35 @@
                     })
                     .catch(function() {});
             }
+
+            // Загрузить cluster/db/settings из /api/config для YAML preview
+            fetch(apiBase + '/api/config')
+                .then(function(r) { return r.json(); })
+                .then(function(cfg) {
+                    if (cfg.cluster)   clusterData.cluster  = cfg.cluster;
+                    if (cfg.db)        clusterData.db       = { user: cfg.db.user || '' }; // без пароля
+                    if (cfg.settings)  clusterData.settings = cfg.settings;
+                    // Sync nodes with ssh_port, ssh_user, ssh_key, dc from config
+                    if (cfg.nodes && cfg.nodes.length) {
+                        cfg.nodes.forEach(function(cn) {
+                            var nd = clusterData.nodes.find(function(n){ return n.id === cn.id; });
+                            if (nd) {
+                                nd.ssh_port = cn.ssh_port || nd.ssh_port || 22;
+                                nd.ssh_user = cn.ssh_user || nd.ssh_user || 'root';
+                                nd.ssh_key  = cn.ssh_key  || nd.ssh_key  || '~/.ssh/id_rsa';
+                                nd.dc       = cn.dc       || nd.dc       || '';
+                            }
+                        });
+                    }
+                    // Sync arbitrators
+                    if (cfg.arbitrators && cfg.arbitrators.length) {
+                        clusterData.arbitrators = cfg.arbitrators;
+                    }
+                    renderYamlPreview();
+                    renderSettingsNodes();
+                    renderArbitratorBlock();
+                })
+                .catch(function() {});
         })();
 
     })();

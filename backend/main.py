@@ -776,6 +776,124 @@ async def reset_grastate(node_id: str):
         log.error(f"reset-grastate {node_id}: {e}")
         raise HTTPException(502, f"SSH error: {e}")
 
+# ── PC.BOOTSTRAP (non-Primary fix via SQL) ───────────────────
+@app.post("/api/node/{node_id}/pc-bootstrap")
+async def pc_bootstrap(node_id: str):
+    """Set wsrep_provider_options='pc.bootstrap=YES' on node via SQL.
+    Soft-fixes a cluster stuck in non-Primary WITHOUT restarting MariaDB.
+    Use ONLY when quorum was lost but network is restored and no split-brain.
+    """
+    cfg = load_config()
+    use_mock = cfg.get("settings", {}).get("use_mock", True)
+    nodes = cfg.get("nodes", [])
+    node = next((n for n in nodes if n["id"] == node_id), None)
+    if not node:
+        raise HTTPException(404, f"Node '{node_id}' not found")
+
+    if use_mock:
+        _push_event("warn", f"[Mock] pc.bootstrap=YES on {node_id} — cluster promoted to Primary", "recovery")
+        return {"ok": True, "mock": True, "node_id": node_id,
+                "message": f"[mock] SET GLOBAL wsrep_provider_options='pc.bootstrap=YES' on {node_id}"}
+
+    try:
+        import pymysql
+    except ImportError:
+        raise HTTPException(500, "pymysql not installed")
+
+    db_cfg = cfg.get("db", {})
+    user   = node.get("db_user") or db_cfg.get("user", "monitor")
+    passwd = node.get("db_password") or db_cfg.get("password", "")
+
+    try:
+        conn = pymysql.connect(
+            host=node["host"], port=int(node.get("port", 3306)),
+            user=user, password=passwd,
+            connect_timeout=4, read_timeout=10,
+            cursorclass=pymysql.cursors.Cursor,
+        )
+        with conn.cursor() as cur:
+            cur.execute("SET GLOBAL wsrep_provider_options='pc.bootstrap=YES'")
+            # Verify state after bootstrap
+            import time; time.sleep(1)
+            cur.execute("SHOW STATUS LIKE 'wsrep_cluster_status'")
+            row = cur.fetchone()
+            new_status = row[1] if row else "unknown"
+        conn.close()
+        ok = new_status == "Primary"
+        _push_event(
+            "info" if ok else "warn",
+            f"pc.bootstrap=YES on {node_id} → wsrep_cluster_status={new_status}",
+            "recovery"
+        )
+        return {"ok": ok, "mock": False, "node_id": node_id,
+                "cluster_status": new_status,
+                "message": f"wsrep_cluster_status = {new_status}"}
+    except Exception as e:
+        log.error(f"pc-bootstrap {node_id}: {e}")
+        raise HTTPException(502, f"SQL error: {e}")
+
+# ── WSREP_RECOVER (seqno when grastate=-1) ───────────────────
+@app.post("/api/node/{node_id}/wsrep-recover")
+async def wsrep_recover(node_id: str):
+    """Run mysqld --wsrep-recover via SSH to determine real seqno
+    when grastate.dat shows seqno: -1 (dirty shutdown / full crash).
+    MariaDB must be STOPPED on the node before calling this.
+    """
+    cfg = load_config()
+    use_mock = cfg.get("settings", {}).get("use_mock", True)
+    nodes = cfg.get("nodes", [])
+    node = next((n for n in nodes if n["id"] == node_id), None)
+    if not node:
+        raise HTTPException(404, f"Node '{node_id}' not found")
+
+    if use_mock:
+        import random, time
+        elapsed = int(time.time())
+        fake_seqno = 485734 + random.randint(0, 50)
+        _push_event("info", f"[Mock] wsrep-recover on {node_id}: seqno={fake_seqno}", "recovery")
+        return {"ok": True, "mock": True, "node_id": node_id,
+                "seqno": fake_seqno,
+                "uuid": "5a7b1c2d-dead-beef-cafe-0123456789ab",
+                "message": f"[mock] Recovered position: 5a7b1c2d-dead-beef-cafe-0123456789ab:{fake_seqno}"}
+
+    try:
+        import paramiko, re
+    except ImportError:
+        raise HTTPException(500, "paramiko not installed")
+
+    try:
+        client = paramiko.SSHClient()
+        client.set_missing_host_key_policy(paramiko.AutoAddPolicy())
+        client.connect(
+            node.get("host"), port=int(node.get("ssh_port", 22)),
+            username=node.get("ssh_user", "root"),
+            key_filename=str(Path(node.get("ssh_key", "~/.ssh/id_rsa")).expanduser()),
+            timeout=10
+        )
+        # mysqld --wsrep-recover writes result to stderr
+        cmd = ("mysqld --wsrep-recover 2>&1 | grep -E 'Recovered position|WSREP: Recovered' | tail -1")
+        _, so, _ = client.exec_command(cmd, timeout=60)
+        output = so.read().decode(errors="replace").strip()
+        client.close()
+
+        # Parse "Recovered position: <uuid>:<seqno>"
+        m = re.search(r'Recovered position.*?([0-9a-f-]{36}):(-?\d+)', output, re.IGNORECASE)
+        if m:
+            uuid_val  = m.group(1)
+            seqno_val = int(m.group(2))
+        else:
+            uuid_val  = "unknown"
+            seqno_val = -1
+
+        _push_event("info", f"wsrep-recover {node_id}: seqno={seqno_val} uuid={uuid_val}", "recovery")
+        return {"ok": True, "mock": False, "node_id": node_id,
+                "seqno": seqno_val, "uuid": uuid_val,
+                "raw": output,
+                "message": f"Recovered position: {uuid_val}:{seqno_val}"}
+    except Exception as e:
+        log.error(f"wsrep-recover {node_id}: {e}")
+        raise HTTPException(502, f"SSH error: {e}")
+
 # ── GARBD STATUS ─────────────────────────────────────────────
 @app.get("/api/garbd")
 async def get_garbd():
@@ -916,3 +1034,92 @@ async def node_action(node_id: str, payload: NodeActionPayload):
     except Exception as e:
         log.error(f"[SSH] {node_id} action failed: {e}")
         raise HTTPException(502, f"SSH error on {node_id}: {e}")
+
+# ── SST PROGRESS ─────────────────────────────────────────────
+@app.get("/api/node/{node_id}/sst-status")
+async def sst_status(node_id: str):
+    """Return SST/IST progress for a node.
+    Reads wsrep_local_state_comment, wsrep_local_recv_queue via SQL.
+    SSH fallback: detect rsync/mariabackup process.
+    """
+    cfg = load_config()
+    use_mock = cfg.get("settings", {}).get("use_mock", True)
+    nodes = cfg.get("nodes", [])
+    node = next((n for n in nodes if n["id"] == node_id), None)
+    if not node:
+        raise HTTPException(404, f"Node '{node_id}' not found")
+
+    if use_mock:
+        import time as _t, random
+        elapsed = int(_t.time()) % 30
+        if elapsed < 5:
+            state = "Joining"; progress = 10 + elapsed * 5
+        elif elapsed < 20:
+            state = "Joined";  progress = 40 + (elapsed - 5) * 4
+        else:
+            state = "Synced";  progress = 100
+        return {"ok": True, "mock": True, "node_id": node_id,
+                "state": state, "progress_pct": min(progress, 100),
+                "recv_queue": random.randint(0, 50) if state != "Synced" else 0,
+                "sst_method": "rsync", "donor": nodes[0]["id"] if nodes else None,
+                "message": f"{node_id}: {state} ({min(progress,100)}%)"}
+
+    result = {"ok": True, "mock": False, "node_id": node_id,
+              "state": "unknown", "progress_pct": 0,
+              "recv_queue": 0, "send_queue": 0,
+              "sst_method": None, "donor": None, "message": ""}
+
+    # SQL: wsrep state
+    db_cfg = cfg.get("db", {})
+    user   = node.get("db_user") or db_cfg.get("user", "monitor")
+    passwd = node.get("db_password") or db_cfg.get("password", "")
+    try:
+        import pymysql
+        conn = pymysql.connect(
+            host=node["host"], port=int(node.get("port", 3306)),
+            user=user, password=passwd, connect_timeout=4, read_timeout=5,
+            cursorclass=pymysql.cursors.Cursor,
+        )
+        with conn.cursor() as cur:
+            for var, key in [
+                ("wsrep_local_state_comment", "state"),
+                ("wsrep_local_recv_queue",    "recv_queue"),
+                ("wsrep_local_send_queue",    "send_queue"),
+            ]:
+                cur.execute(f"SHOW STATUS LIKE '{var}'")
+                row = cur.fetchone()
+                if row:
+                    result[key] = row[1] if key == "state" else int(row[1])
+        conn.close()
+    except Exception:
+        pass
+
+    # SSH: detect active SST process
+    try:
+        import paramiko, re as _re
+        client = paramiko.SSHClient()
+        client.set_missing_host_key_policy(paramiko.AutoAddPolicy())
+        client.connect(
+            node.get("host"), port=int(node.get("ssh_port", 22)),
+            username=node.get("ssh_user", "root"),
+            key_filename=str(Path(node.get("ssh_key", "~/.ssh/id_rsa")).expanduser()),
+            timeout=6
+        )
+        _, so, _ = client.exec_command(
+            "pgrep -la rsync 2>/dev/null || pgrep -la mariabackup 2>/dev/null || echo none",
+            timeout=8
+        )
+        proc_out = so.read().decode(errors="replace").strip()
+        if "rsync" in proc_out:      result["sst_method"] = "rsync"
+        elif "mariabackup" in proc_out: result["sst_method"] = "mariabackup"
+        client.close()
+    except Exception:
+        pass
+
+    state_progress = {
+        "Synced": 100, "Joined": 95, "Donor/Desynced": 50,
+        "Joining": 15, "Open": 5, "unknown": 0
+    }
+    result["progress_pct"] = state_progress.get(result["state"], 10)
+    result["message"] = f"{node_id}: {result['state']} (recv_queue={result['recv_queue']})"
+    return result

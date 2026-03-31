@@ -1088,6 +1088,16 @@
                         <label class="form-label">Выбрать Bootstrap-кандидата</label>
                         <div style="display:flex;flex-direction:column;gap:var(--space-2)" id="bootstrapCandidates"></div>
                     </div>
+                    <div style="display:flex;gap:var(--space-2);margin-bottom:var(--space-3)">
+                        <button class="btn btn-ghost" style="flex:1" onclick="App.refreshSeqno()" title="Обновить seqno из grastate.dat">
+                            <svg width="14" height="14" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2.5"><polyline points="23 4 23 10 17 10"/><path d="M20.49 15a9 9 0 1 1-.02-8.49"/></svg>
+                            Обновить seqno (grastate.dat)
+                        </button>
+                        <button class="btn btn-ghost" style="flex:1" onclick="App.runWsrepRecover()" title="mysqld --wsrep-recover на всех нодах (MariaDB должна быть остановлена!)">
+                            <svg width="14" height="14" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2.5"><circle cx="11" cy="11" r="8"/><line x1="21" y1="21" x2="16.65" y2="16.65"/></svg>
+                            wsrep-recover (seqno=-1)
+                        </button>
+                    </div>
                     <button class="btn btn-warning btn-lg" style="width:100%" onclick="App.doBootstrap()">
                         <svg width="18" height="18" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2"><polygon points="5 3 19 12 5 21 5 3"/></svg>
                         Запустить galera_new_cluster
@@ -2065,6 +2075,9 @@
 
             // Строка 2: дополнительные действия
             var rowExtra = (
+                (node.wsrep_cluster_status && node.wsrep_cluster_status !== 'Primary' && node.online
+                    ? '<button class="btn btn-warning btn-sm" onclick="App.doPcBootstrap(\'' + node.id + '\')" title="Soft-fix: SET wsrep_provider_options=pc.bootstrap=YES">⚡ pc.bootstrap</button>'
+                    : '') +
                 a('set_read_only',  node.read_only ? 'btn-danger' : 'btn-ghost', '<rect x="3" y="11" width="18" height="11" rx="2"/><path d="M7 11V7a5 5 0 0 1 10 0v4"/>', node.read_only ? '🔒 R/O' : 'R/O') +
                 a('set_read_write', !node.read_only ? 'btn-success' : 'btn-ghost', '<rect x="3" y="11" width="18" height="11" rx="2"/><path d="M7 11V7a5 5 0 0 1 5-4.9"/>', !node.read_only ? '✓ R/W' : 'R/W') +
                 btnPing
@@ -2084,6 +2097,16 @@
                 '</div>' +
                 (node.error ? '<div class="node-error-banner">⚠ ' + node.error + '</div>' : '') +
                 '<div class="node-metrics">' + metricsHtml + '</div>' +
+                ((['Joining','Joined','Donor/Desynced'].indexOf(node.state) !== -1) ?
+                    '<div style="padding:var(--space-2) var(--space-4) var(--space-1)" id="sst-bar-' + node.id + '">' +
+                    '<div style="font-size:var(--text-xs);color:var(--text-muted);margin-bottom:4px">' +
+                    'SST/IST: ' + node.state + ' — ' + (node.sst_method || '?') + (node.sst_donor ? ' ← ' + node.sst_donor : '') +
+                    '</div>' +
+                    '<div style="height:6px;background:var(--color-surface-offset-2);border-radius:9999px;overflow:hidden">' +
+                    '<div style="height:100%;width:' + (node.sst_progress || 10) + '%;background:var(--color-primary);' +
+                    'border-radius:9999px;transition:width .5s ease"></div>' +
+                    '</div>' +
+                    '</div>' : '') +
                 '<div class="node-actions">' + rowMain + '</div>' +
                 '<div class="node-actions">' + rowExtra + '</div>' +
                 '</div>';
@@ -2279,7 +2302,9 @@
                 if (s > maxSeqno) maxSeqno = s;
             });
             el.innerHTML = clusterData.nodes.map(function(node, i) {
-                var seqno = (node.metrics && node.metrics.wsrep_last_committed) ? node.metrics.wsrep_last_committed : '—';
+                var seqno = node.seqno_fresh !== undefined ? node.seqno_fresh
+                    : (node.metrics && node.metrics.wsrep_last_committed) ? node.metrics.wsrep_last_committed : '—';
+                var seqnoSrc = node.seqno_fresh !== undefined ? ' (wsrep-recover)' : ' (live)';
                 var isCandidate = parseInt(seqno) === maxSeqno && maxSeqno > 0;
                 return '<label style="display:flex;align-items:center;gap:var(--space-3);background:var(--surface-2);' +
                     'border-radius:var(--radius-md);padding:var(--space-3) var(--space-4);cursor:pointer;' +
@@ -2288,7 +2313,7 @@
                     '<span style="font-weight:600">' + node.name + '</span>' +
                     (isCandidate ? '<span style="font-size:var(--text-xs);color:var(--success);font-weight:700">★ кандидат</span>' : '') +
                     '<span style="font-family:var(--font-mono);font-size:var(--text-xs);color:var(--text-muted)">' + (node.host || '') + '</span>' +
-                    '<span style="margin-left:auto;font-family:var(--font-mono);font-size:var(--text-xs)">seqno: ' + seqno + '</span>' +
+                    '<span style="margin-left:auto;font-family:var(--font-mono);font-size:var(--text-xs)" title="' + seqnoSrc + '">seqno: ' + seqno + (node.safe_to_bootstrap ? ' ✓bootstrap' : '') + '</span>' +
                     '</label>';
             }).join('');
             // Обновить rejoin select
@@ -2855,6 +2880,85 @@
                 });
             },
 
+            refreshSeqno: function() {
+                addLog("INFO", "Обновление seqno из /api/seqno...");
+                var apiBase = getApiBase();
+                fetch(apiBase + "/api/seqno")
+                    .then(function(r) { return r.json(); })
+                    .then(function(res) {
+                        if (!res.nodes) return;
+                        res.nodes.forEach(function(sn) {
+                            var node = clusterData.nodes.find(function(n){ return n.id === sn.id; });
+                            if (node) {
+                                node.seqno_fresh = sn.seqno;
+                                node.safe_to_bootstrap = sn.safe_to_bootstrap;
+                            }
+                        });
+                        addLog("INFO", "seqno обновлён. Кандидат: " + (res.candidate || "—") + " seqno=" + res.candidate_seqno);
+                        toast("success", "seqno обновлён. Кандидат: " + (res.candidate || "—"));
+                        renderBootstrapCandidates();
+                    })
+                    .catch(function(e) { toast("error", "seqno ошибка: " + e.message); });
+            },
+
+            runWsrepRecover: function() {
+                confirm("🔍", "Запустить wsrep-recover на всех нодах?",
+                    "MariaDB должна быть ОСТАНОВЛЕНА на всех нодах.\n" +
+                    "Команда: mysqld --wsrep-recover\n" +
+                    "Используется когда grastate.dat показывает seqno: -1 (dirty shutdown).",
+                    "btn-warning").then(function(ok) {
+                    if (!ok) return;
+                    var nodes = clusterData.nodes || [];
+                    if (!nodes.length) { toast("warning", "Нет нод"); return; }
+                    toast("info", "wsrep-recover запущен на " + nodes.length + " нодах...");
+                    addLog("WARN", "wsrep-recover запущен на всех нодах");
+                    var apiBase = getApiBase();
+                    var promises = nodes.map(function(node) {
+                        return fetch(apiBase + "/api/node/" + node.id + "/wsrep-recover", { method: "POST" })
+                            .then(function(r) { return r.json(); })
+                            .then(function(res) {
+                                node.seqno_fresh = res.seqno;
+                                node.wsrep_uuid = res.uuid;
+                                addLog(res.ok ? "INFO" : "ERROR",
+                                    node.name + ": wsrep-recover seqno=" + res.seqno + " uuid=" + (res.uuid || "?"));
+                                return res;
+                            })
+                            .catch(function(e) {
+                                addLog("ERROR", node.name + ": wsrep-recover failed: " + e.message);
+                            });
+                    });
+                    Promise.all(promises).then(function() {
+                        renderBootstrapCandidates();
+                        toast("success", "wsrep-recover завершён. Обновите список кандидатов.");
+                    });
+                });
+            },
+
+            doPcBootstrap: function(nodeId) {
+                var node = clusterData.nodes.find(function(n){ return n.id === nodeId; });
+                confirm("⚡", "pc.bootstrap на " + (node ? node.name : nodeId) + "?",
+                    "Выполнит SET GLOBAL wsrep_provider_options='pc.bootstrap=YES'.\n" +
+                    "Нода будет принудительно повышена до Primary без перезапуска.\n" +
+                    "Используйте только при потере кворума без split-brain!",
+                    "btn-warning").then(function(ok) {
+                    if (!ok) return;
+                    var apiBase = getApiBase();
+                    fetch(apiBase + "/api/node/" + nodeId + "/pc-bootstrap", { method: "POST" })
+                        .then(function(r) { return r.json(); })
+                        .then(function(res) {
+                            if (res.ok) {
+                                addLog("INFO", nodeId + ": pc.bootstrap=YES → " + (res.cluster_status || "Primary"));
+                                toast("success", nodeId + ": кластер восстановлен как Primary ✓");
+                                setTimeout(fetchRealData, 1500);
+                            } else {
+                                addLog("ERROR", "pc.bootstrap failed: " + (res.message || "unknown"));
+                                toast("error", "Ошибка pc.bootstrap: " + (res.message || "unknown"));
+                            }
+                        })
+                        .catch(function(e) { toast("error", "Ошибка: " + e.message); });
+                });
+            },
+
             doBootstrap: function() {
                 var radios = document.querySelectorAll('input[name="bootstrap"]');
                 var chosen = null;
@@ -3395,6 +3499,34 @@
         addLog('INFO', 'Режим: ' + _dataMode.toUpperCase() + ' · Контур: ' + _env.toUpperCase());
         renderAll();
 
+        function pollSstProgress() {
+            if (!clusterData.nodes || _dataMode !== "real") return;
+            var sstNodes = clusterData.nodes.filter(function(n) {
+                return ["Joining","Joined","Donor/Desynced"].indexOf(n.state) !== -1;
+            });
+            if (!sstNodes.length) return;
+            var apiBase = getApiBase();
+            sstNodes.forEach(function(node) {
+                fetch(apiBase + "/api/node/" + node.id + "/sst-status")
+                    .then(function(r) { return r.json(); })
+                    .then(function(res) {
+                        node.sst_progress = res.progress_pct || 0;
+                        node.sst_method   = res.sst_method || null;
+                        node.sst_donor    = res.donor || null;
+                        var bar = document.getElementById("sst-bar-" + node.id);
+                        if (bar) {
+                            var fill = bar.querySelector("div div");
+                            if (fill) fill.style.width = (res.progress_pct || 0) + "%";
+                            var label = bar.querySelector("div");
+                            if (label) label.textContent = "SST/IST: " + (res.state || node.state) +
+                                " — " + (res.sst_method || "?") + (res.donor ? " ← " + res.donor : "") +
+                                " (" + (res.progress_pct || 0) + "%)";
+                        }
+                    })
+                    .catch(function() {});
+            });
+        }
+
         function startAutoRefresh() {
             if (_pollTimer) clearInterval(_pollTimer);
             _pollTimer = setInterval(function() {
@@ -3417,6 +3549,7 @@
                 } else {
                     // Real mode — вызываем backend API
                     fetchRealData();
+                    pollSstProgress();
                 }
             }, _pollIntervalMs);
         }
@@ -3463,6 +3596,9 @@
                                 wsrep_received_bytes:       nd.wsrep_received_bytes     || '—',
                             },
                             read_only: nd.read_only || false,
+                            sst_progress: nd.sst_progress || 0,
+                            sst_method: nd.sst_method || null,
+                            sst_donor: nd.sst_donor || null,
                         };
                     });
                     if (data.arbitrators) clusterData.arbitrators = data.arbitrators;

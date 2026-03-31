@@ -502,7 +502,9 @@
             margin-bottom: var(--space-6);
             text-align: center;
         }
-        .topology-svg { max-width: 700px; margin: 0 auto; width: 100%; }
+        .topology-svg { max-width: 900px; margin: 0 auto; width: 100%; display: block; overflow: visible; }
+        .topo-node-card { cursor: default; transition: filter 0.2s; }
+        .topo-node-card:hover { filter: brightness(1.05); }
 
         /* --- LOG --- */
         .log-wrap {
@@ -1023,38 +1025,8 @@
             </div>
 
             <div class="topology-wrap">
-                <svg class="topology-svg" viewBox="0 0 700 360" xmlns="http://www.w3.org/2000/svg" id="topoSvg">
-                    <!-- cluster ring -->
-                    <ellipse cx="350" cy="160" rx="260" ry="110" fill="none" stroke-width="1.5" stroke-dasharray="6 4" id="topoRing" stroke="rgba(59,130,246,0.3)"/>
-                    <!-- label cluster -->
-                    <text x="350" y="20" text-anchor="middle" font-family="Inter,sans-serif" font-size="13" font-weight="600" fill="currentColor" id="topoClusterLabel">Galera Cluster — Test Contour</text>
-                    <!-- connection line -->
-                    <line x1="155" y1="160" x2="545" y2="160" stroke-width="2.5" stroke-linecap="round" id="topoLine" stroke="#3b82f6"/>
-                    <text x="350" y="152" text-anchor="middle" font-family="JetBrains Mono,monospace" font-size="11" id="topoLineLabel" fill="#3b82f6">IST / SST</text>
-                    <!-- node gc01 -->
-                    <rect x="60" y="100" width="190" height="120" rx="12" fill="currentColor" id="topoN1Rect" style="fill:var(--surface);stroke:var(--success);stroke-width:2"/>
-                    <text x="155" y="138" text-anchor="middle" font-family="Inter,sans-serif" font-size="15" font-weight="700" id="topoN1Name" style="fill:var(--text)">gc01</text>
-                    <text x="155" y="158" text-anchor="middle" font-family="JetBrains Mono,monospace" font-size="11" id="topoN1Host" style="fill:var(--text-muted)">10.0.0.11:3306</text>
-                    <rect x="80" y="170" width="150" height="26" rx="6" id="topoN1Badge" style="fill:var(--success-dim)"/>
-                    <text x="155" y="188" text-anchor="middle" font-family="Inter,sans-serif" font-size="12" font-weight="700" id="topoN1State" style="fill:var(--success)">SYNCED</text>
-                    <!-- node gc02 -->
-                    <rect x="450" y="100" width="190" height="120" rx="12" id="topoN2Rect" style="fill:var(--surface);stroke:var(--success);stroke-width:2"/>
-                    <text x="545" y="138" text-anchor="middle" font-family="Inter,sans-serif" font-size="15" font-weight="700" id="topoN2Name" style="fill:var(--text)">gc02</text>
-                    <text x="545" y="158" text-anchor="middle" font-family="JetBrains Mono,monospace" font-size="11" id="topoN2Host" style="fill:var(--text-muted)">10.0.0.12:3306</text>
-                    <rect x="470" y="170" width="150" height="26" rx="6" id="topoN2Badge" style="fill:var(--success-dim)"/>
-                    <text x="545" y="188" text-anchor="middle" font-family="Inter,sans-serif" font-size="12" font-weight="700" id="topoN2State" style="fill:var(--success)">SYNCED</text>
-                    <!-- cluster size label -->
-                    <text x="350" y="350" text-anchor="middle" font-family="Inter,sans-serif" font-size="11" id="topoSizeLabel" style="fill:var(--text-muted)">Cluster Size: 2 · Status: Primary · Cert Failures: 0</text>
-                    <!-- Arbitrator (PROD only, hidden by default) -->
-                    <g id="topoArbRect" visibility="hidden">
-                        <rect x="260" y="228" width="180" height="112" rx="12" style="fill:var(--surface);stroke:var(--warning);stroke-width:2" id="topoArbRectBg"/>
-                        <text x="350" y="252" text-anchor="middle" font-family="Inter,sans-serif" font-size="14" font-weight="700" style="fill:var(--text)" id="topoArbLabel">garbd</text>
-                        <text x="350" y="268" text-anchor="middle" font-family="JetBrains Mono,monospace" font-size="11" style="fill:var(--text-muted)" id="topoArbHost">arbitrator</text>
-                        <text x="350" y="283" text-anchor="middle" font-family="Inter,sans-serif" font-size="10" font-weight="600" style="fill:var(--primary)" id="topoArbDc"></text>
-                        <line x1="275" y1="291" x2="425" y2="291" stroke="var(--border)" stroke-width="1" opacity="0.5"/>
-                        <rect x="285" y="296" width="130" height="22" rx="6" style="fill:var(--warning-dim)" id="topoArbBadge"/>
-                        <text x="350" y="311" text-anchor="middle" font-family="Inter,sans-serif" font-size="11" font-weight="700" style="fill:var(--warning)" id="topoArbState">RUNNING</text>
-                    </g>
+                <svg id="topoSvg" class="topology-svg" xmlns="http://www.w3.org/2000/svg">
+                    <!-- dynamically generated by renderTopology() -->
                 </svg>
             </div>
 
@@ -2124,141 +2096,239 @@
 
         // ---- TOPOLOGY ----
         function renderTopology() {
-            if (!clusterData.nodes || clusterData.nodes.length === 0) {
-                var tbl0 = document.getElementById('topoTable');
-                if (tbl0) tbl0.innerHTML = '<p style="padding:1rem;color:var(--color-text-muted)">Нет нод в мониторинге</p>';
-                return;
-            }
-            var n0 = clusterData.nodes[0];
-            var n1 = clusterData.nodes.length > 1 ? clusterData.nodes[1] : null;
+            var svg = document.getElementById('topoSvg');
+            if (!svg) return;
 
+            var nodes = clusterData.nodes || [];
+            var n = nodes.length;
+
+            // ── helpers ──────────────────────────────────────────────────────────
             function svgColor(state) {
                 if (state === 'Synced') return 'var(--success)';
-                if (state === 'Donor')  return 'var(--warning)';
+                if (state === 'Donor' || state === 'Donor/Desynced') return 'var(--warning)';
                 if (state === 'Joiner') return 'var(--info)';
                 return 'var(--error)';
             }
             function svgBg(state) {
                 if (state === 'Synced') return 'var(--success-dim)';
-                if (state === 'Donor')  return 'var(--warning-dim)';
+                if (state === 'Donor' || state === 'Donor/Desynced') return 'var(--warning-dim)';
                 if (state === 'Joiner') return 'var(--info-dim)';
                 return 'var(--error-dim)';
             }
+            function esc(s) { return String(s||'').replace(/&/g,'&amp;').replace(/</g,'&lt;').replace(/>/g,'&gt;'); }
 
-            var lineOk = n1 ? (n0.state !== 'Offline' && n1.state !== 'Offline') : false;
-            var lineEl = document.getElementById('topoLine');
-            if (lineEl) {
-                lineEl.setAttribute('stroke', lineOk ? 'var(--success)' : 'var(--error)');
-                lineEl.setAttribute('stroke-dasharray', lineOk ? 'none' : '8 4');
-            }
-            var lbl = document.getElementById('topoLineLabel');
-            if (lbl) {
-                lbl.setAttribute('fill', lineOk ? 'var(--success)' : 'var(--error)');
-                lbl.textContent = lineOk ? 'IST / SST' : 'DISCONNECTED';
-            }
-
-            // node 1 — обновляем имя, хост и состояние из данных
-            var r1 = document.getElementById('topoN1Rect');
-            var s1 = document.getElementById('topoN1State');
-            var b1 = document.getElementById('topoN1Badge');
-            var nm1 = document.getElementById('topoN1Name');
-            var h1  = document.getElementById('topoN1Host');
-            if (r1)  r1.setAttribute('style', 'fill:var(--surface);stroke:' + svgColor(n0.state) + ';stroke-width:2');
-            if (s1)  { s1.textContent = n0.state.toUpperCase(); s1.setAttribute('style', 'fill:' + svgColor(n0.state)); }
-            if (b1)  b1.setAttribute('style', 'fill:' + svgBg(n0.state));
-            if (nm1) nm1.textContent = n0.name || n0.id || 'node1';
-            if (h1)  h1.textContent  = (n0.host || '') + ':' + (n0.port || 3306);
-
-            // node 2 — обновляем имя, хост и состояние из данных
-            var r2  = document.getElementById('topoN2Rect');
-            var s2  = document.getElementById('topoN2State');
-            var b2  = document.getElementById('topoN2Badge');
-            var nm2 = document.getElementById('topoN2Name');
-            var h2  = document.getElementById('topoN2Host');
-            var n1s = n1 ? n1.state : 'Offline';
-            if (r2)  r2.setAttribute('style', 'fill:var(--surface);stroke:' + svgColor(n1s) + ';stroke-width:2');
-            if (s2)  { s2.textContent = n1s.toUpperCase(); s2.setAttribute('style', 'fill:' + svgColor(n1s)); }
-            if (b2)  b2.setAttribute('style', 'fill:' + svgBg(n1s));
-            if (nm2) nm2.textContent = n1 ? (n1.name || n1.id || 'node2') : '—';
-            if (h2)  h2.textContent  = n1 ? ((n1.host || '') + ':' + (n1.port || 3306)) : '—';
-
-            // cluster size label
-            var sz = document.getElementById('topoSizeLabel');
-            if (sz && n0.metrics) {
-                sz.textContent = 'Cluster Size: ' + (n0.metrics.wsrep_cluster_size || '—') +
-                    ' · Status: ' + (n0.metrics.wsrep_cluster_status || '—') +
-                    ' · Cert Failures: ' + (n0.metrics.wsrep_local_cert_failures || '0') +
-                    ' · BF Aborts: ' + (n0.metrics.wsrep_bf_aborts || '0');
-            }
-
-            // Арбитр — отображаем в PROD контуре
-            // Arbitrators — show from arbitrators[] (no env restriction)
-            var arbEl  = document.getElementById('topoArbRect');
-            var arbElBg = document.getElementById('topoArbRectBg');
-            var arbLbl = document.getElementById('topoArbLabel');
-            var arbs   = (clusterData.arbitrators && clusterData.arbitrators.length)
-                ? clusterData.arbitrators
+            // ── arbitrators ──────────────────────────────────────────────────────
+            var arbs = (clusterData.arbitrators && clusterData.arbitrators.length)
+                ? clusterData.arbitrators.filter(function(a){ return a.host; })
                 : (clusterData.arbitrator && clusterData.arbitrator.host ? [clusterData.arbitrator] : []);
-            var firstArb = arbs.find(function(a){ return a.host; });
-            if (arbEl) {
-                var arbVisible = !!firstArb;
-                arbEl.setAttribute('visibility', arbVisible ? 'visible' : 'hidden');
-                if (arbLbl) arbLbl.setAttribute('visibility', arbVisible ? 'visible' : 'hidden');
-                if (arbVisible) {
-                    var arbBadge  = document.getElementById('topoArbBadge');
-                    var arbState  = document.getElementById('topoArbState');
-                    var arbHostEl = document.getElementById('topoArbHost');
-                    var arbOnline = firstArb.online !== false;
-                    var arbColor  = arbOnline ? 'var(--success)' : 'var(--error)';
-                    if (arbElBg) arbElBg.setAttribute('style', 'fill:var(--surface);stroke:' + arbColor + ';stroke-width:2');
-                    else arbEl.setAttribute('style', 'fill:var(--surface);stroke:' + arbColor + ';stroke-width:2');
-                    if (arbBadge) arbBadge.setAttribute('style', 'fill:' + (arbOnline ? 'var(--success-dim)' : 'var(--error-dim)'));
-                    if (arbState) { arbState.textContent = arbOnline ? 'RUNNING' : 'OFFLINE'; arbState.setAttribute('style', 'fill:' + arbColor); }
-                    if (arbHostEl) arbHostEl.textContent = firstArb.host || 'arbitrator';
-                    var arbDcEl = document.getElementById('topoArbDc');
-                    if (arbDcEl) {
-                        if (firstArb.dc) {
-                            arbDcEl.textContent = 'DC: ' + firstArb.dc;
-                            arbDcEl.setAttribute('visibility', 'visible');
-                        } else {
-                            arbDcEl.textContent = '';
-                            arbDcEl.setAttribute('visibility', 'hidden');
-                        }
-                    }
-                    if (arbLbl) arbLbl.textContent = arbs.length > 1 ? 'garbd ×' + arbs.length : 'garbd';
-                }
-            }
-            // comparison table
-            var tbl = document.getElementById('topoTable');
-            if (!tbl || !n0.metrics) return;
-            if (!n1 || !n1.metrics) {
-                var keys1 = Object.keys(n0.metrics);
-                var rows1 = keys1.map(function(k) {
-                    var v0 = n0.metrics[k]; var c0 = metricClass(k, v0);
-                    return '<tr><td class="mono">' + k + '</td><td class="' + c0 + '">' + v0 + '</td><td style="color:var(--color-text-muted)">—</td></tr>';
-                }).join('');
-                var seq0s = parseInt(n0.metrics.wsrep_last_committed) || 0;
-                var seqRow1 = '<tr style="background:var(--color-surface-offset)"><td class="mono" style="font-weight:700">⊿ seqno</td><td class="ok" style="font-weight:700">' + seq0s + '</td><td style="color:var(--color-text-muted)">—</td></tr>';
-                tbl.innerHTML = '<table><thead><tr><th>Переменная</th><th>' + n0.name + '</th><th>—</th></tr></thead><tbody>' + seqRow1 + rows1 + '</tbody></table>';
+
+            // ── empty state ──────────────────────────────────────────────────────
+            if (n === 0) {
+                svg.setAttribute('viewBox','0 0 500 200');
+                svg.innerHTML = '<text x="250" y="100" text-anchor="middle" font-family="Inter,sans-serif" font-size="14" style="fill:var(--color-text-muted)">Нет нод в мониторинге</text>';
+                var tbl0 = document.getElementById('topoTable');
+                if (tbl0) tbl0.innerHTML = '';
                 return;
             }
-            var keys = Object.keys(n0.metrics);
-            var rows = keys.map(function(k) {
-                var v0 = n0.metrics[k]; var v1 = n1.metrics[k] !== undefined ? n1.metrics[k] : '—';
-                var c0 = metricClass(k, v0); var c1 = metricClass(k, v1);
-                return '<tr><td class="mono">' + k + '</td><td class="' + c0 + '">' + v0 + '</td><td class="' + c1 + '">' + v1 + '</td></tr>';
-            }).join('');
-            // Вычисляем дельту seqno между нодами
-            var seq0 = parseInt(n0.metrics.wsrep_last_committed) || 0;
-            var seq1 = parseInt(n1.metrics.wsrep_last_committed) || 0;
-            var seqDelta = Math.abs(seq0 - seq1);
-            var deltaClass = seqDelta === 0 ? 'ok' : (seqDelta < 10 ? 'warn' : 'error');
+
+            // ── layout constants ─────────────────────────────────────────────────
+            var NODE_W   = 190;
+            var NODE_H   = 120;
+            var NODE_RX  = 12;
+            var BADGE_H  = 24;
+            var BADGE_Y_OFF = 72; // offset from node top
+            var H_GAP    = 36;   // horizontal gap between nodes
+            var PADDING  = 40;   // left/right canvas padding
+            var TOP_LABEL_H = 28;
+            var NODE_ROW_Y = TOP_LABEL_H + 20;
+            var ARB_H    = 100;
+            var ARB_W    = 180;
+            var ARB_GAP  = 24;
+
+            // Total SVG width: fit all nodes in a row
+            var totalNodesW = n * NODE_W + (n - 1) * H_GAP;
+            var svgW = Math.max(totalNodesW + 2 * PADDING, 500);
+            // x-start so nodes are centered
+            var nodesStartX = (svgW - totalNodesW) / 2;
+
+            var hasArb = arbs.length > 0;
+            var svgH = NODE_ROW_Y + NODE_H + 40 + (hasArb ? ARB_H + ARB_GAP + 20 : 16);
+
+            svg.setAttribute('viewBox', '0 0 ' + svgW + ' ' + svgH);
+
+            // ── cluster status bar (1 primary node's metrics) ────────────────────
+            var primaryNode = nodes.find(function(nd){ return nd.metrics && nd.metrics.wsrep_cluster_status; }) || nodes[0];
+            var m = (primaryNode && primaryNode.metrics) ? primaryNode.metrics : {};
+            var statusText = 'Cluster Size: ' + (m.wsrep_cluster_size || n) +
+                ' · Status: ' + (m.wsrep_cluster_status || '—') +
+                ' · Cert Failures: ' + (m.wsrep_local_cert_failures || '0') +
+                ' · BF Aborts: ' + (m.wsrep_bf_aborts || '0');
+
+            var clusterLabel = (clusterData.cluster && clusterData.cluster.name)
+                ? clusterData.cluster.name
+                : 'Galera Cluster';
+            var clusterEnv = (clusterData.cluster && (clusterData.cluster.environment || clusterData.cluster.contour))
+                ? ' — ' + (clusterData.cluster.environment || clusterData.cluster.contour)
+                : '';
+
+            // ── build node positions ─────────────────────────────────────────────
+            var nodePositions = [];
+            for (var i = 0; i < n; i++) {
+                var nx = nodesStartX + i * (NODE_W + H_GAP);
+                var ny = NODE_ROW_Y;
+                nodePositions.push({ x: nx, y: ny, cx: nx + NODE_W / 2, cy: ny + NODE_H / 2 });
+            }
+
+            // ── arbitrator position (centered below nodes) ───────────────────────
+            var arbCX = svgW / 2;
+            var arbY  = NODE_ROW_Y + NODE_H + ARB_GAP;
+            var arbX  = arbCX - ARB_W / 2;
+
+            // ── SVG content ──────────────────────────────────────────────────────
+            var parts = [];
+
+            // cluster label top
+            parts.push('<text x="' + (svgW/2) + '" y="18" text-anchor="middle" font-family="Inter,sans-serif" font-size="13" font-weight="600" style="fill:var(--color-text)" id="topoClusterLabel">' + esc(clusterLabel + clusterEnv) + '</text>');
+
+            // mesh connection lines between all node pairs
+            var anyOnline = nodes.some(function(nd){ return nd.state !== 'Offline' && nd.online !== false; });
+            for (var i = 0; i < n; i++) {
+                for (var j = i + 1; j < n; j++) {
+                    var pi = nodePositions[i];
+                    var pj = nodePositions[j];
+                    var niState = nodes[i].state;
+                    var njState = nodes[j].state;
+                    var lineOk  = niState !== 'Offline' && njState !== 'Offline'
+                        && nodes[i].online !== false && nodes[j].online !== false;
+                    var lineColor = lineOk ? 'var(--success)' : 'var(--error)';
+                    var lineDash  = lineOk ? '' : ' stroke-dasharray="8 4"';
+                    // Curve lines for 3+ nodes to avoid overlap
+                    if (n <= 2) {
+                        var midY = pi.cy - 22;
+                        parts.push('<path d="M' + pi.cx + ' ' + pi.cy + ' Q' + ((pi.cx+pj.cx)/2) + ' ' + midY + ' ' + pj.cx + ' ' + pj.cy + '" fill="none" stroke="' + lineColor + '" stroke-width="2"' + lineDash + ' stroke-linecap="round" opacity="0.7"/>');
+                        // label on first pair only for 2 nodes
+                        if (i === 0 && j === 1) {
+                            parts.push('<text x="' + ((pi.cx+pj.cx)/2) + '" y="' + (midY - 6) + '" text-anchor="middle" font-family="JetBrains Mono,monospace" font-size="10" style="fill:' + lineColor + '" opacity="0.9">' + (lineOk ? 'IST / SST' : 'DISCONNECTED') + '</text>');
+                        }
+                    } else {
+                        parts.push('<line x1="' + pi.cx + '" y1="' + pi.cy + '" x2="' + pj.cx + '" y2="' + pj.cy + '" stroke="' + lineColor + '" stroke-width="1.5"' + lineDash + ' stroke-linecap="round" opacity="0.5"/>');
+                    }
+                }
+            }
+
+            // lines from nodes to arbitrator
+            if (hasArb) {
+                arbs.forEach(function(arb) {
+                    var arbOnline = arb.online !== false;
+                    var ac = arbOnline ? 'var(--warning)' : 'var(--error)';
+                    nodePositions.forEach(function(pos) {
+                        parts.push('<line x1="' + pos.cx + '" y1="' + (pos.y + NODE_H) + '" x2="' + arbCX + '" y2="' + arbY + '" stroke="' + ac + '" stroke-width="1" stroke-dasharray="5 3" opacity="0.45"/>');
+                    });
+                });
+            }
+
+            // node cards
+            nodes.forEach(function(node, i) {
+                var pos   = nodePositions[i];
+                var state = node.state || 'Offline';
+                var col   = svgColor(state);
+                var bg    = svgBg(state);
+                var nm    = esc(node.name || node.id || ('node' + (i+1)));
+                var host  = esc((node.host || '') + ':' + (node.port || 3306));
+                var ro    = node.read_only === true || (node.metrics && node.metrics.read_only === 'ON');
+                var roTag = ro ? ' <tspan font-size="9" style="fill:var(--warning)">[R/O]</tspan>' : '';
+                var seqno = (node.metrics && node.metrics.wsrep_last_committed) ? node.metrics.wsrep_last_committed : '—';
+
+                parts.push('<g class="topo-node-card">');
+                // card rect
+                parts.push('<rect x="' + pos.x + '" y="' + pos.y + '" width="' + NODE_W + '" height="' + NODE_H + '" rx="' + NODE_RX + '" style="fill:var(--color-surface);stroke:' + col + ';stroke-width:2"/>');
+                // node name
+                parts.push('<text x="' + pos.cx + '" y="' + (pos.y + 28) + '" text-anchor="middle" font-family="Inter,sans-serif" font-size="14" font-weight="700" style="fill:var(--color-text)">' + nm + roTag + '</text>');
+                // host
+                parts.push('<text x="' + pos.cx + '" y="' + (pos.y + 46) + '" text-anchor="middle" font-family="JetBrains Mono,monospace" font-size="10" style="fill:var(--color-text-muted)">' + host + '</text>');
+                // seqno
+                parts.push('<text x="' + pos.cx + '" y="' + (pos.y + 62) + '" text-anchor="middle" font-family="JetBrains Mono,monospace" font-size="9" style="fill:var(--color-text-faint)">seq: ' + esc(String(seqno)) + '</text>');
+                // state badge
+                parts.push('<rect x="' + (pos.x + 20) + '" y="' + (pos.y + BADGE_Y_OFF) + '" width="' + (NODE_W - 40) + '" height="' + BADGE_H + '" rx="6" style="fill:' + bg + '"/>');
+                parts.push('<text x="' + pos.cx + '" y="' + (pos.y + BADGE_Y_OFF + 16) + '" text-anchor="middle" font-family="Inter,sans-serif" font-size="11" font-weight="700" style="fill:' + col + '">' + esc(state.toUpperCase()) + '</text>');
+                // recv queue warning dot
+                var rq = parseInt((node.metrics || {}).wsrep_local_recv_queue) || 0;
+                if (rq > 0) {
+                    parts.push('<circle cx="' + (pos.x + NODE_W - 12) + '" cy="' + (pos.y + 12) + '" r="6" style="fill:var(--warning)" title="recv_queue=' + rq + '"/>');
+                    parts.push('<text x="' + (pos.x + NODE_W - 12) + '" y="' + (pos.y + 16) + '" text-anchor="middle" font-family="Inter,sans-serif" font-size="8" font-weight="700" style="fill:#000">Q</text>');
+                }
+                parts.push('</g>');
+            });
+
+            // arbitrator card(s)
+            if (hasArb) {
+                var firstArb = arbs[0];
+                var arbOnline = firstArb.online !== false;
+                var arbColor  = arbOnline ? 'var(--warning)' : 'var(--error)';
+                var arbBgColor= arbOnline ? 'var(--warning-dim)' : 'var(--error-dim)';
+                var arbLabel  = arbs.length > 1 ? 'garbd ×' + arbs.length : 'garbd';
+                parts.push('<g>');
+                parts.push('<rect x="' + arbX + '" y="' + arbY + '" width="' + ARB_W + '" height="' + ARB_H + '" rx="10" style="fill:var(--color-surface);stroke:' + arbColor + ';stroke-width:2"/>');
+                parts.push('<text x="' + arbCX + '" y="' + (arbY + 24) + '" text-anchor="middle" font-family="Inter,sans-serif" font-size="13" font-weight="700" style="fill:var(--color-text)">' + esc(arbLabel) + '</text>');
+                parts.push('<text x="' + arbCX + '" y="' + (arbY + 40) + '" text-anchor="middle" font-family="JetBrains Mono,monospace" font-size="10" style="fill:var(--color-text-muted)">' + esc(firstArb.host || 'arbitrator') + '</text>');
+                if (firstArb.dc) {
+                    parts.push('<text x="' + arbCX + '" y="' + (arbY + 56) + '" text-anchor="middle" font-family="Inter,sans-serif" font-size="9" font-weight="600" style="fill:var(--color-primary)">DC: ' + esc(firstArb.dc) + '</text>');
+                }
+                parts.push('<line x1="' + (arbX + 15) + '" y1="' + (arbY + 66) + '" x2="' + (arbX + ARB_W - 15) + '" y2="' + (arbY + 66) + '" stroke="var(--color-border)" stroke-width="1" opacity="0.5"/>');
+                parts.push('<rect x="' + (arbX + 25) + '" y="' + (arbY + 72) + '" width="' + (ARB_W - 50) + '" height="20" rx="5" style="fill:' + arbBgColor + '"/>');
+                parts.push('<text x="' + arbCX + '" y="' + (arbY + 86) + '" text-anchor="middle" font-family="Inter,sans-serif" font-size="11" font-weight="700" style="fill:' + arbColor + '">' + (arbOnline ? 'RUNNING' : 'OFFLINE') + '</text>');
+                parts.push('</g>');
+            }
+
+            // bottom status line
+            parts.push('<text x="' + (svgW/2) + '" y="' + (svgH - 6) + '" text-anchor="middle" font-family="Inter,sans-serif" font-size="10" id="topoSizeLabel" style="fill:var(--color-text-muted)">' + esc(statusText) + '</text>');
+
+            svg.innerHTML = parts.join('\n');
+
+            // ── subtitle update ──────────────────────────────────────────────────
+            var sub = document.getElementById('topoSubtitle');
+            if (sub) sub.textContent = 'Схема MariaDB Galera Cluster' + (clusterEnv ? clusterEnv : '');
+
+            // ── comparison table ─────────────────────────────────────────────────
+            var tbl = document.getElementById('topoTable');
+            if (!tbl) return;
+
+            if (n === 0 || !nodes[0].metrics) {
+                tbl.innerHTML = '';
+                return;
+            }
+
+            // Build columns: всегда все ноды
+            var keys = Object.keys(nodes[0].metrics);
+            // header
+            var thead = '<tr><th>Переменная</th>' + nodes.map(function(nd){ return '<th>' + esc(nd.name || nd.id) + '</th>'; }).join('') + '</tr>';
+
+            // seqno delta row
+            var seqnos = nodes.map(function(nd){ return parseInt((nd.metrics || {}).wsrep_last_committed) || 0; });
+            var maxSeq = Math.max.apply(null, seqnos);
+            var minSeq = Math.min.apply(null, seqnos);
+            var totalDelta = maxSeq - minSeq;
+            var deltaCls = totalDelta === 0 ? 'ok' : (totalDelta < 10 ? 'warn' : 'error');
             var deltaRow = '<tr style="background:var(--color-surface-offset)">' +
                 '<td class="mono" style="font-weight:700">⊿ seqno lag</td>' +
-                '<td class="' + deltaClass + '" style="font-weight:700">' + seq0 + '</td>' +
-                '<td class="' + deltaClass + '" style="font-weight:700">' + seq1 + ' <span style="font-size:var(--text-xs);opacity:.7">(Δ=' + seqDelta + ')</span></td>' +
+                seqnos.map(function(s, i){
+                    var d = maxSeq - s;
+                    var cls = d === 0 ? 'ok' : (d < 10 ? 'warn' : 'error');
+                    return '<td class="' + cls + '" style="font-weight:700">' + s + (d > 0 ? ' <span style="font-size:var(--text-xs);opacity:.7">(Δ=' + d + ')</span>' : '') + '</td>';
+                }).join('') +
                 '</tr>';
-            tbl.innerHTML = '<table><thead><tr><th>Переменная</th><th>' + n0.name + '</th><th>' + n1.name + '</th></tr></thead><tbody>' + deltaRow + rows + '</tbody></table>';
+
+            // metric rows
+            var rows = keys.map(function(k) {
+                var cells = nodes.map(function(nd){
+                    var v = nd.metrics && nd.metrics[k] !== undefined ? nd.metrics[k] : '—';
+                    var c = metricClass(k, v);
+                    return '<td class="' + c + '">' + esc(String(v)) + '</td>';
+                }).join('');
+                return '<tr><td class="mono">' + esc(k) + '</td>' + cells + '</tr>';
+            }).join('');
+
+            tbl.innerHTML = '<table><thead>' + thead + '</thead><tbody>' + deltaRow + rows + '</tbody></table>';
         }
 
         // ---- HEADER STATUS ----

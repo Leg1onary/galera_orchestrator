@@ -52,13 +52,13 @@ def _push_event(level: str, message: str, source: str = "system"):
 async def lifespan(app: FastAPI):
     cfg   = load_config()
     nodes = [n["id"] for n in cfg.get("nodes", []) if n.get("enabled")]
-    arb   = cfg.get("arbitrator", {}).get("enabled", False)
+    arbs  = [a for a in cfg.get("arbitrators", []) if a.get("enabled", True)]
     mode  = "mock" if cfg.get("settings", {}).get("use_mock", True) else "real"
     log.info(
         f"Starting Galera Orchestrator | nodes={len(nodes)} | "
-        f"arbitrator={'yes' if arb else 'no'} | mode={mode}"
+        f"arbitrators={len(arbs)} | mode={mode}"
     )
-    _push_event("info", f"Galera Orchestrator started | nodes={nodes} | mode={mode}", "system")
+    _push_event("info", f"Galera Orchestrator started | nodes={nodes} | arbitrators={len(arbs)} | mode={mode}", "system")
     yield
 
 
@@ -177,16 +177,18 @@ async def api_nodes():
             "enabled":  n.get("enabled", True),
             "role":     n.get("role", "node"),
         })
-    arb = cfg.get("arbitrator", {})
-    return {
-        "nodes": nodes,
-        "arbitrator": {
-            "enabled": arb.get("enabled", False),
-            "host":    arb.get("host", ""),
-            "ssh_port": arb.get("ssh_port", 22),
-        },
-        "cluster": cfg.get("cluster", {}),
-    }
+    arbs_raw = cfg.get("arbitrators", [])
+    if not arbs_raw:
+        oa = cfg.get("arbitrator", {})
+        if oa.get("host"):
+            arbs_raw = [{"id":"arb01","dc":"DC1",**oa,"enabled":oa.get("enabled",False)}]
+    arbitrators = [{"id":a.get("id",f"arb{i+1}"),"host":a.get("host",""),
+                    "ssh_port":a.get("ssh_port",22),"dc":a.get("dc","DC1"),
+                    "enabled":a.get("enabled",True)} for i,a in enumerate(arbs_raw)]
+    for nc in cfg.get("nodes",[]):
+        ne = next((x for x in nodes if x["id"]==nc.get("id")),None)
+        if ne: ne["dc"] = nc.get("dc","")
+    return {"nodes":nodes,"arbitrators":arbitrators,"cluster":cfg.get("cluster",{})}
 
 @app.get("/api/node/{node_id}/test-connection")
 async def test_connection(node_id: str):
@@ -285,6 +287,7 @@ class NodePayload(BaseModel):
     ssh_port: int = 22
     ssh_user: str = "root"
     ssh_key: str = "~/.ssh/id_rsa"
+    dc: Optional[str] = "DC1"
 
 @app.post("/api/config/node")
 async def add_node(payload: NodePayload):
@@ -327,31 +330,46 @@ async def delete_node(node_id: str):
 
 # ── ARBITRATOR ────────────────────────────────────────────────
 class ArbitratorPayload(BaseModel):
+    id: Optional[str] = None
     host: str
     ssh_port: int = 22
     ssh_user: str = "root"
     ssh_key: str = "~/.ssh/id_rsa"
+    dc: str = "DC1"
 
 @app.post("/api/config/arbitrator")
 async def set_arbitrator(payload: ArbitratorPayload):
     cfg = load_config()
-    cfg["arbitrator"] = {**payload.model_dump(), "enabled": True}
+    arbs = cfg.setdefault("arbitrators", [])
+    arb_id = payload.id or f"arb{len(arbs)+1:02d}"
+    data = {**payload.model_dump(), "id": arb_id, "enabled": True}
+    idx = next((i for i,a in enumerate(arbs) if a.get("id")==arb_id), None)
+    if idx is not None: arbs[idx] = data
+    else: arbs.append(data)
     save_config(cfg)
+    _push_event("info", f"Arbitrator added: {arb_id} ({payload.host}) DC={payload.dc}", "config")
+    return {"ok": True, "id": arb_id}
+
+@app.delete("/api/config/arbitrator/{arb_id}")
+async def remove_arbitrator(arb_id: str):
+    cfg = load_config()
+    before = len(cfg.get("arbitrators", []))
+    cfg["arbitrators"] = [a for a in cfg.get("arbitrators",[]) if a.get("id") != arb_id]
+    if len(cfg.get("arbitrators",[])) == before:
+        raise HTTPException(404, f"Arbitrator '{arb_id}' not found")
+    save_config(cfg)
+    _push_event("warning", f"Arbitrator removed: {arb_id}", "config")
     return {"ok": True}
 
 @app.delete("/api/config/arbitrator")
-async def remove_arbitrator():
-    cfg = load_config()
-    cfg["arbitrator"] = {"enabled": False, "host": "", "ssh_port": 22,
-                         "ssh_user": "root", "ssh_key": "~/.ssh/id_rsa"}
-    save_config(cfg)
-    return {"ok": True}
+async def remove_arbitrator_legacy():
+    cfg = load_config(); cfg["arbitrators"] = []; save_config(cfg); return {"ok": True}
 
 # ── RELOAD ────────────────────────────────────────────────────
 async def _do_reload():
     cfg   = load_config()
     nodes = [n["id"] for n in cfg.get("nodes", []) if n.get("enabled")]
-    arb   = cfg.get("arbitrator", {}).get("enabled", False)
+    arbs  = [a for a in cfg.get("arbitrators", []) if a.get("enabled", True)]
     mode  = "mock" if cfg.get("settings", {}).get("use_mock", True) else "real"
     log.info(f"Config reloaded | nodes={nodes} | arbitrator={arb} | mode={mode}")
     return {"ok": True, "nodes": nodes, "arbitrator": arb, "mode": mode}
@@ -638,34 +656,30 @@ async def do_rejoin(payload: RejoinPayload):
 async def get_garbd():
     cfg = load_config()
     use_mock = cfg.get("settings", {}).get("use_mock", True)
-    arb = cfg.get("arbitrator", {})
-
-    if not arb.get("enabled", False):
-        return {"enabled": False, "online": False}
-
+    arbs = cfg.get("arbitrators", [])
+    if not arbs:
+        oa = cfg.get("arbitrator", {})
+        if oa.get("host"): arbs = [{"id":"arb01","dc":"DC1",**oa}]
+    enabled = [a for a in arbs if a.get("enabled", True) and a.get("host")]
+    if not enabled: return {"arbitrators":[], "enabled":False}
     if use_mock:
-        from mock_data import mock_garbd_status
-        return mock_garbd_status(arb)
+        return {"arbitrators":[{"id":a.get("id"),"dc":a.get("dc","DC1"),"host":a.get("host",""),"online":True,"enabled":True} for a in enabled],"enabled":True}
+    try: import paramiko
+    except ImportError: raise HTTPException(500,"paramiko not installed")
+    results=[]
+    for arb in enabled:
+        try:
+            c=paramiko.SSHClient(); c.set_missing_host_key_policy(paramiko.AutoAddPolicy())
+            c.connect(arb.get("host"),port=int(arb.get("ssh_port",22)),
+                      username=arb.get("ssh_user","root"),
+                      key_filename=str(Path(arb.get("ssh_key","~/.ssh/id_rsa")).expanduser()),timeout=6)
+            _,so,_=c.exec_command("systemctl is-active garbd",timeout=10)
+            out=so.read().decode(errors="replace").strip(); ec=so.channel.recv_exit_status(); c.close()
+            results.append({"id":arb.get("id"),"dc":arb.get("dc",""),"host":arb.get("host",""),"online":ec==0,"enabled":True})
+        except Exception as e:
+            results.append({"id":arb.get("id"),"dc":arb.get("dc",""),"host":arb.get("host",""),"online":False,"enabled":True,"error":str(e)})
+    return {"arbitrators":results,"enabled":True}
 
-    # Real mode — SSH: systemctl is-active garbd
-    try:
-        import paramiko
-    except ImportError:
-        raise HTTPException(500, "paramiko not installed")
-    try:
-        client = paramiko.SSHClient()
-        client.set_missing_host_key_policy(paramiko.AutoAddPolicy())
-        client.connect(arb.get("host"), port=int(arb.get("ssh_port",22)),
-                       username=arb.get("ssh_user","root"),
-                       key_filename=str(Path(arb.get("ssh_key","~/.ssh/id_rsa")).expanduser()),
-                       timeout=6)
-        _, so, _ = client.exec_command("systemctl is-active garbd && systemctl status garbd --no-pager -l | head -20", timeout=10)
-        out = so.read().decode(errors="replace").strip()
-        ec  = so.channel.recv_exit_status()
-        client.close()
-        return {"enabled": True, "online": ec == 0, "host": arb.get("host",""), "raw": out}
-    except Exception as e:
-        return {"enabled": True, "online": False, "host": arb.get("host",""), "error": str(e)}
 
 # ── NODE SSH PING ─────────────────────────────────────────────
 @app.get("/api/node/{node_id}/ping")
@@ -777,3 +791,4 @@ async def node_action(node_id: str, payload: NodeActionPayload):
     except Exception as e:
         log.error(f"[SSH] {node_id} action failed: {e}")
         raise HTTPException(502, f"SSH error on {node_id}: {e}")
+        

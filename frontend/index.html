@@ -5186,8 +5186,8 @@
                 var infoText = p.Info ? (p.Info.length > 80 ? p.Info.substring(0,80)+'…' : p.Info) : '—';
                 var killBtn = (p.Command !== 'Sleep' && p.Id)
                     ? '<button class="btn btn-sm" style="padding:2px 8px;font-size:0.7rem;background:var(--color-error);color:#fff;border-radius:4px" '
-                    + 'onclick="Diag.killQuery('' + nodeId + '',' + p.Id + ')" title="KILL QUERY ' + p.Id + '">KILL</button>'
-            : '';
+                    + 'onclick="Diag.killQuery(\'' + nodeId + '\',' + p.Id + ')" title="KILL QUERY ' + p.Id + '">KILL</button>'
+                    : '';
                 return '<tr>'
                     + '<td style="font-family:monospace">' + (p.Id||'') + '</td>'
                     + '<td>' + (p.User||'') + '</td>'

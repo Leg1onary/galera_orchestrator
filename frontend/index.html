@@ -990,6 +990,7 @@
                     <button class="log-filter-btn info-f" onclick="App.filterLog('INFO',this)">INFO</button>
                     <button class="log-filter-btn warn-f" onclick="App.filterLog('WARN',this)">WARN</button>
                     <button class="log-filter-btn error-f" onclick="App.filterLog('ERROR',this)">ERROR</button>
+                    <button class="btn btn-ghost btn-sm" onclick="App.exportLog()" title="Скачать лог"><svg width="12" height="12" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2.5"><path d="M21 15v4a2 2 0 0 1-2 2H5a2 2 0 0 1-2-2v-4"/><polyline points="7 10 12 15 17 10"/><line x1="12" y1="15" x2="12" y2="3"/></svg> Экспорт</button>
                     <button class="btn btn-ghost btn-sm" onclick="App.clearLog()">Очистить</button>
                 </div>
                 <div class="log-body" id="logBody"></div>
@@ -1091,6 +1092,18 @@
                         <svg width="18" height="18" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2"><polygon points="5 3 19 12 5 21 5 3"/></svg>
                         Запустить galera_new_cluster
                     </button>
+                    <div style="margin-top:var(--space-5);padding:var(--space-4);background:rgba(161,44,123,.08);border:1px solid rgba(161,44,123,.25);border-radius:var(--radius-md)">
+                        <div style="font-size:var(--text-sm);font-weight:700;color:var(--error);margin-bottom:var(--space-2)">
+                            ⚠ Если все ноды имеют seqno: -1 (полный крах)
+                        </div>
+                        <p style="font-size:var(--text-xs);color:var(--text-muted);margin-bottom:var(--space-3)">
+                            Установить <code style="font-family:var(--font-mono);background:var(--surface-3);padding:1px 4px;border-radius:3px">safe_to_bootstrap: 1</code> в <code style="font-family:var(--font-mono);background:var(--surface-3);padding:1px 4px;border-radius:3px">grastate.dat</code> вручную на выбранной ноде-кандидате. Только после этого выполнять Bootstrap.
+                        </p>
+                        <button class="btn btn-danger" style="width:100%" onclick="App.resetGrastate()">
+                            <svg width="14" height="14" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2.5"><path d="M10.29 3.86L1.82 18a2 2 0 0 0 1.71 3h16.94"/><line x1="12" y1="9" x2="12" y2="13"/></svg>
+                            Сбросить grastate.dat (safe_to_bootstrap=1)
+                        </button>
+                    </div>
                 </div>
 
                 <!-- Rejoin -->
@@ -1119,6 +1132,31 @@
                     <button class="btn btn-primary btn-lg" style="width:100%" onclick="App.doRejoin()">
                         <svg width="18" height="18" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2"><polyline points="23 4 23 10 17 10"/><path d="M20.49 15a9 9 0 1 1-.02-8.49"/></svg>
                         Rejoin Node
+                    </button>
+                </div>
+
+                <!-- Донор SST -->
+                <div class="form-section">
+                    <div class="form-section-title">
+                        <svg width="20" height="20" viewBox="0 0 24 24" fill="none" stroke="var(--success)" stroke-width="2"><path d="M22 16.92v3a2 2 0 0 1-2.18 2 19.79 19.79 0 0 1-8.63-3.07A19.5 19.5 0 0 1 4.36 12a19.79 19.79 0 0 1-3.07-8.63A2 2 0 0 1 3.27 2h3a2 2 0 0 1 2 1.72 12.84 12.84 0 0 0 .7 2.81 2 2 0 0 1-.45 2.11L8.09 9.91a16 16 0 0 0 6 6l1.27-1.27a2 2 0 0 1 2.11-.45 12.84 12.84 0 0 0 2.81.7A2 2 0 0 1 22 16.92z"/></svg>
+                        Принудительный донор SST
+                    </div>
+                    <p class="text-sm text-muted" style="margin-bottom:var(--space-4)">
+                        По умолчанию Galera сам выбирает донора. Укажите ноду явно, чтобы не перегружать основной сервер при SST.
+                    </p>
+                    <div class="form-row">
+                        <div class="form-group">
+                            <label class="form-label">Нода-реципиент <span>(кто получает данные)</span></label>
+                            <select class="form-input" id="sstRecipientSelect"><option value="">— выберите ноду —</option></select>
+                        </div>
+                        <div class="form-group">
+                            <label class="form-label">Донор <span>(кто отдаёт данные)</span></label>
+                            <select class="form-input" id="sstDonorSelect"><option value="">— выберите донора —</option></select>
+                        </div>
+                    </div>
+                    <button class="btn btn-success" style="width:100%" onclick="App.setSstDonor()">
+                        <svg width="16" height="16" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2.5"><path d="M22 16.92v3a2 2 0 0 1-2.18 2"/><path d="M5 9l7-7 7 7"/><path d="M12 2v14"/></svg>
+                        Установить донора (wsrep_sst_donor)
                     </button>
                 </div>
             </div>
@@ -2027,8 +2065,8 @@
 
             // Строка 2: дополнительные действия
             var rowExtra = (
-                a('set_read_only',  'btn-ghost', '<rect x="3" y="11" width="18" height="11" rx="2"/><path d="M7 11V7a5 5 0 0 1 10 0v4"/>', 'R/O') +
-                a('set_read_write', 'btn-ghost', '<rect x="3" y="11" width="18" height="11" rx="2"/><path d="M7 11V7a5 5 0 0 1 5-4.9"/>', 'R/W') +
+                a('set_read_only',  node.read_only ? 'btn-danger' : 'btn-ghost', '<rect x="3" y="11" width="18" height="11" rx="2"/><path d="M7 11V7a5 5 0 0 1 10 0v4"/>', node.read_only ? '🔒 R/O' : 'R/O') +
+                a('set_read_write', !node.read_only ? 'btn-success' : 'btn-ghost', '<rect x="3" y="11" width="18" height="11" rx="2"/><path d="M7 11V7a5 5 0 0 1 5-4.9"/>', !node.read_only ? '✓ R/W' : 'R/W') +
                 btnPing
             );
 
@@ -2041,6 +2079,7 @@
                 '</div>' +
                 '<div style="display:flex;align-items:center;gap:6px">' + pingBadge +
                 '<span class="node-state-badge ' + bc + '">' + node.state + '</span>' +
+                (node.read_only ? '<span style="display:inline-block;font-size:var(--text-xs);background:rgba(161,44,123,.15);color:var(--error);padding:1px 8px;border-radius:9999px;font-weight:700;letter-spacing:.04em;margin-left:4px">R/O</span>' : '') +
                 '</div>' +
                 '</div>' +
                 (node.error ? '<div class="node-error-banner">⚠ ' + node.error + '</div>' : '') +
@@ -2257,6 +2296,17 @@
         }
 
         function _updateRejoinSelect(nodes) {
+            // Заполняем SST recipient/donor selects
+            ['sstRecipientSelect','sstDonorSelect'].forEach(function(id) {
+                var s = document.getElementById(id);
+                if (!s) return;
+                var cur = s.value;
+                s.innerHTML = '<option value="">— выберите —</option>' +
+                    nodes.map(function(n) {
+                        return '<option value="' + n.id + '"' + (n.id === cur ? ' selected' : '') + '>' +
+                            n.name + ' (' + (n.host || '') + ')' + (n.state ? ' — ' + n.state : '') + '</option>';
+                    }).join('');
+            });
             var sel = document.getElementById('rejoinNodeSelect');
             if (!sel) return;
             if (!nodes || nodes.length === 0) {
@@ -2543,7 +2593,7 @@
                 fetch(_apiB4 + '/api/log')
                     .then(function(r) { return r.json(); })
                     .then(function(data) {
-                        var entries = (data && data.entries) ? data.entries : [];
+                        var entries = (data && (data.entries || data.events)) ? (data.entries || data.events) : [];
                         var added = 0;
                         entries.forEach(function(e) {
                             var t = e.timestamp ? e.timestamp.slice(11,19) : '--:--:--';
@@ -2634,6 +2684,38 @@
                 renderLog();
             },
 
+            exportLog: function() {
+                var lines = logLines.map(function(l) {
+                    return "[" + l.time + "] [" + l.level + "] " + l.msg;
+                });
+                // Попробовать подгрузить полный лог с бекенда
+                var apiBase = getApiBase();
+                if (_dataMode === "real") {
+                    fetch(apiBase + "/api/log?limit=500")
+                        .then(function(r) { return r.json(); })
+                        .then(function(data) {
+                            var backendLines = (data.events || data.entries || []).map(function(e) {
+                                return "[" + (e.ts || e.timestamp || "--") + "] [" + (e.level || "INFO") + "] " + (e.message || e.msg || "");
+                            });
+                            _downloadLog(backendLines.join("\n"));
+                        })
+                        .catch(function() { _downloadLog(lines.join("\n")); });
+                } else {
+                    _downloadLog(lines.join("\n"));
+                }
+                function _downloadLog(text) {
+                    var blob = new Blob([text], { type: "text/plain" });
+                    var a = document.createElement("a");
+                    a.href = URL.createObjectURL(blob);
+                    var d = new Date();
+                    a.download = "galera-events-" + d.toISOString().slice(0,19).replace(/[T:]/g,"-") + ".log";
+                    a.click();
+                    URL.revokeObjectURL(a.href);
+                    addLog("INFO", "Лог экспортирован");
+                    toast("success", "Лог сохранён");
+                }
+            },
+
             clearLog: function() {
                 logLines = [];
                 renderLog();
@@ -2696,7 +2778,17 @@
                             });
                     } else {
                         // Mock mode — симуляция
-                        if (action === 'stop') {
+                        if (action === 'set_read_only') {
+                            node.read_only = true;
+                            addLog('WARN', node.name + ': Read Only ON (симуляция)');
+                            toast('warning', node.name + ': R/O включён');
+                            renderAll(); return;
+                        } else if (action === 'set_read_write') {
+                            node.read_only = false;
+                            addLog('INFO', node.name + ': Read Only OFF (симуляция)');
+                            toast('success', node.name + ': R/W включён');
+                            renderAll(); return;
+                        } else if (action === 'stop') {
                             node.state = 'Offline';
                             node.metrics.wsrep_cluster_status = 'non-Primary';
                             node.metrics.wsrep_connected = 'OFF';
@@ -2736,6 +2828,33 @@
                 });
             },
 
+            resetGrastate: function() {
+                var candidates = document.querySelectorAll('input[name="bootstrapCandidate"]:checked');
+                var nodeId = candidates.length ? candidates[0].value : null;
+                if (!nodeId) { toast("warning", "Выберите ноду-кандидата для сброса grastate.dat"); return; }
+                var node = clusterData.nodes.find(function(n){ return n.id === nodeId; });
+                confirm("⚠️", "Сброс grastate.dat на " + (node ? node.name : nodeId) + "?",
+                    "ОПАСНО: это изменит файл grastate.dat.\n" +
+                    "Делайте ТОЛЬКО при полном краше кластера когда все ноды имеют seqno=-1.\n" +
+                    "Выбирайте ноду с НАИБОЛЬШИМ seqno (из анализа выше).",
+                    "btn-danger").then(function(ok) {
+                    if (!ok) return;
+                    var apiBase = getApiBase();
+                    fetch(apiBase + "/api/node/" + nodeId + "/reset-grastate", { method: "POST" })
+                        .then(function(r) { return r.json(); })
+                        .then(function(res) {
+                            if (res.ok) {
+                                addLog("WARN", nodeId + ": grastate.dat → safe_to_bootstrap=1");
+                                toast("warning", "grastate.dat сброшен. Теперь запустите Bootstrap.");
+                            } else {
+                                addLog("ERROR", "reset-grastate failed: " + (res.message || "unknown"));
+                                toast("error", "Ошибка: " + (res.message || "unknown"));
+                            }
+                        })
+                        .catch(function(e) { toast("error", "Ошибка: " + e.message); });
+                });
+            },
+
             doBootstrap: function() {
                 var radios = document.querySelectorAll('input[name="bootstrap"]');
                 var chosen = null;
@@ -2768,6 +2887,35 @@
                         }, 1500);
                     }
                 });
+            },
+
+            setSstDonor: function() {
+                var recipient = document.getElementById("sstRecipientSelect").value;
+                var donor = document.getElementById("sstDonorSelect").value;
+                if (!recipient || !donor) { toast("warning", "Выберите реципиента и донора"); return; }
+                if (recipient === donor) { toast("warning", "Реципиент и донор не могут совпадать"); return; }
+                if (_dataMode === "real") {
+                    var apiBase = getApiBase();
+                    fetch(apiBase + "/api/node/" + recipient + "/set-donor", {
+                        method: "POST",
+                        headers: { "Content-Type": "application/json" },
+                        body: JSON.stringify({ donor: donor })
+                    })
+                        .then(function(r) { return r.json(); })
+                        .then(function(res) {
+                            if (res.ok) {
+                                addLog("INFO", "SST донор для " + recipient + " → " + donor);
+                                toast("success", "Донор установлен: " + donor);
+                            } else {
+                                addLog("ERROR", "set-donor failed: " + (res.error || "unknown"));
+                                toast("error", "Ошибка: " + (res.error || "unknown"));
+                            }
+                        })
+                        .catch(function(e) { toast("error", "Ошибка: " + e.message); });
+                } else {
+                    addLog("INFO", "[Mock] SST донор для " + recipient + " установлен на " + donor + " (wsrep_sst_donor)");
+                    toast("success", "[Mock] Донор: " + donor + " → " + recipient);
+                }
             },
 
             doRejoin: function() {
@@ -3313,7 +3461,8 @@
                                 wsrep_cluster_state_uuid:   nd.wsrep_cluster_state_uuid || '—',
                                 wsrep_replicated_bytes:     nd.wsrep_replicated_bytes   || '—',
                                 wsrep_received_bytes:       nd.wsrep_received_bytes     || '—',
-                            }
+                            },
+                            read_only: nd.read_only || false,
                         };
                     });
                     if (data.arbitrators) clusterData.arbitrators = data.arbitrators;
@@ -3402,7 +3551,7 @@
                 fetch(apiBase + '/api/log')
                     .then(function(r) { return r.json(); })
                     .then(function(data) {
-                        var entries = (data && data.entries) ? data.entries : [];
+                        var entries = (data && (data.entries || data.events)) ? (data.entries || data.events) : [];
                         if (!entries.length) return;
                         // Добавляем только те записи которых ещё нет в logLines (по времени+msg)
                         var existingMsgs = new Set(logLines.map(function(l){ return l.time + l.msg; }));

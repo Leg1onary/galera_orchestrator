@@ -130,9 +130,12 @@ def _real_node_status(node: dict, cfg: dict) -> dict:
         with conn.cursor() as cur:
             cur.execute("SHOW STATUS LIKE 'wsrep%'")
             rows = cur.fetchall()
+            cur.execute("SHOW GLOBAL VARIABLES LIKE 'read_only'")
+            ro_rows = cur.fetchall()
         conn.close()
 
         status = {row[0]: row[1] for row in rows}
+        read_only_val = ro_rows[0][1].upper() if ro_rows else 'OFF'
 
         # cast numeric fields
         def _int(k):
@@ -162,6 +165,7 @@ def _real_node_status(node: dict, cfg: dict) -> dict:
             "wsrep_apply_oooe":             round(_float("wsrep_apply_oooe"), 4),
             "wsrep_cluster_conf_id":        _int("wsrep_cluster_conf_id"),
             "wsrep_cluster_state_uuid":     status.get("wsrep_cluster_state_uuid", ""),
+            "read_only":                    read_only_val == "ON",
         })
         log.debug(f"[{node['id']}] real status OK — {base['wsrep_local_state_comment']}")
 

@@ -692,6 +692,90 @@ async def do_rejoin(payload: RejoinPayload):
     steps.append({"step":len(steps)+1,"status":"done","message":f"Rejoin {payload.node_id} запущен. Ждите Synced."})
     return {"ok": True, "mock": False, "node_id": payload.node_id, "method": payload.method, "steps": steps}
 
+# ── SET SST DONOR ───────────────────────────────────────────
+class SetDonorPayload(BaseModel):
+    donor: str  # node name (wsrep_node_name) to use as SST donor
+
+@app.post("/api/node/{node_id}/set-donor")
+async def set_sst_donor(node_id: str, payload: SetDonorPayload):
+    """Set wsrep_sst_donor on a node via SQL to control which node provides SST."""
+    cfg = load_config()
+    use_mock = cfg.get("settings", {}).get("use_mock", True)
+    nodes = cfg.get("nodes", [])
+    node = next((n for n in nodes if n["id"] == node_id), None)
+    if not node:
+        raise HTTPException(404, f"Node '{node_id}' not found")
+    if use_mock:
+        _push_event("info", f"[Mock] wsrep_sst_donor on {node_id} set to {payload.donor}", "sst")
+        return {"ok": True, "mock": True, "node_id": node_id, "donor": payload.donor}
+    try:
+        import pymysql
+    except ImportError:
+        raise HTTPException(500, "pymysql not installed")
+    db_cfg = cfg.get("db", {})
+    user   = node.get("db_user") or db_cfg.get("user", "monitor")
+    passwd = node.get("db_password") or db_cfg.get("password", "")
+    try:
+        conn = pymysql.connect(
+            host=node["host"], port=int(node.get("port", 3306)),
+            user=user, password=passwd,
+            connect_timeout=4, read_timeout=5,
+            cursorclass=pymysql.cursors.Cursor,
+        )
+        with conn.cursor() as cur:
+            cur.execute(f"SET GLOBAL wsrep_sst_donor = %s", (payload.donor,))
+        conn.close()
+        _push_event("info", f"wsrep_sst_donor on {node_id} set to {payload.donor}", "sst")
+        return {"ok": True, "mock": False, "node_id": node_id, "donor": payload.donor}
+    except Exception as e:
+        log.error(f"set-donor {node_id}: {e}")
+        raise HTTPException(502, f"SQL error: {e}")
+
+# ── RESET GRASTATE ──────────────────────────────────────────
+@app.post("/api/node/{node_id}/reset-grastate")
+async def reset_grastate(node_id: str):
+    """Set safe_to_bootstrap=1 in grastate.dat via SSH.
+    Use ONLY when all nodes have seqno=-1 after full cluster crash.
+    Must be done on the node with the highest seqno.
+    """
+    cfg = load_config()
+    use_mock = cfg.get("settings", {}).get("use_mock", True)
+    nodes = cfg.get("nodes", [])
+    node = next((n for n in nodes if n["id"] == node_id), None)
+    if not node:
+        raise HTTPException(404, f"Node '{node_id}' not found")
+    if use_mock:
+        _push_event("warn", f"[Mock] grastate.dat reset: safe_to_bootstrap=1 on {node_id}", "recovery")
+        return {"ok": True, "mock": True, "node_id": node_id,
+                "message": f"[mock] sed grastate.dat safe_to_bootstrap: 0 → 1 on {node_id}"}
+    try:
+        import paramiko
+    except ImportError:
+        raise HTTPException(500, "paramiko not installed")
+    try:
+        client = paramiko.SSHClient()
+        client.set_missing_host_key_policy(paramiko.AutoAddPolicy())
+        client.connect(
+            node.get("host"), port=int(node.get("ssh_port", 22)),
+            username=node.get("ssh_user", "root"),
+            key_filename=str(Path(node.get("ssh_key", "~/.ssh/id_rsa")).expanduser()),
+            timeout=10
+        )
+        grastate_path = "/var/lib/mysql/grastate.dat"
+        cmd = f"sed -i 's/safe_to_bootstrap: 0/safe_to_bootstrap: 1/' {grastate_path}"
+        _, so, se = client.exec_command(cmd, timeout=15)
+        ec = so.channel.recv_exit_status()
+        err = se.read().decode(errors="replace").strip()
+        client.close()
+        if ec != 0:
+            raise Exception(f"exit={ec} | {err}")
+        _push_event("warn", f"grastate.dat MODIFIED: safe_to_bootstrap=1 on {node_id} — ready for bootstrap", "recovery")
+        return {"ok": True, "mock": False, "node_id": node_id,
+                "message": f"safe_to_bootstrap set to 1 on {node_id}. Run Bootstrap next."}
+    except Exception as e:
+        log.error(f"reset-grastate {node_id}: {e}")
+        raise HTTPException(502, f"SSH error: {e}")
+
 # ── GARBD STATUS ─────────────────────────────────────────────
 @app.get("/api/garbd")
 async def get_garbd():

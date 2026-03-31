@@ -27,6 +27,12 @@ logging.basicConfig(
 )
 log = logging.getLogger("main")
 
+class _SuppressDevTools(logging.Filter):
+    def filter(self, record):
+        return "/.well-known/appspecific" not in record.getMessage()
+
+logging.getLogger("uvicorn.access").addFilter(_SuppressDevTools())
+
 _event_log: deque = deque(maxlen=500)
 _prev_status: dict = {}
 
@@ -67,6 +73,10 @@ app.mount("/assets", StaticFiles(directory=str(ASSETS)), name="assets")
 @app.get("/", response_class=HTMLResponse)
 async def index():
     return FileResponse(str(FRONTEND / "index.html"))
+
+@app.get("/favicon.ico", include_in_schema=False)
+async def favicon():
+    return FileResponse(str(FRONTEND / "favicon.ico"))
 
 @app.get("/api/status")
 async def api_status():

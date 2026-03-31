@@ -15,9 +15,6 @@
     <link rel="preconnect" href="https://fonts.gstatic.com" crossorigin>
     <link href="https://fonts.googleapis.com/css2?family=Inter:wght@300..700&family=JetBrains+Mono:wght@400;500&display=swap" rel="stylesheet">
     <style>
-        /* ============================================================
-           DESIGN TOKENS
-           ============================================================ */
         :root {
             --font-body: 'Inter', system-ui, sans-serif;
             --font-mono: 'JetBrains Mono', 'Fira Code', monospace;
@@ -115,9 +112,6 @@
             --shadow-lg: 0 8px 32px rgba(0,0,0,0.12);
         }
 
-        /* ============================================================
-           RESET & BASE
-           ============================================================ */
         *, *::before, *::after { box-sizing: border-box; margin: 0; padding: 0; }
         html { font-size: 16px; -webkit-font-smoothing: antialiased; }
         body {
@@ -456,15 +450,16 @@
             display: flex;
             flex-wrap: wrap;
             gap: var(--space-2);
+            margin-top: var(--space-4);
+            padding-top: var(--space-4);
+            border-top: 1px solid var(--border);
+        }
+        /* Второй ряд кнопок — с отступом и тонким разделителем */
+        .node-actions + .node-actions {
             margin-top: var(--space-3);
             padding-top: var(--space-3);
             border-top: 1px solid var(--border);
-        }
-        /* Второй ряд кнопок — без разделителя */
-        .node-actions + .node-actions {
-            margin-top: var(--space-1);
-            padding-top: var(--space-2);
-            border-top: none;
+            opacity: 0.85;
         }
 
         /* --- LOADING SPINNER --- */
@@ -1291,59 +1286,75 @@
             <div class="doc-section">
                 <div class="doc-section-title">
                     <svg width="22" height="22" viewBox="0 0 24 24" fill="none" stroke="var(--primary)" stroke-width="2"><rect x="2" y="2" width="20" height="8" rx="2"/><rect x="2" y="14" width="20" height="8" rx="2"/></svg>
-                    Действия с нодами
+                    Управление сервисом MariaDB
                 </div>
                 <div class="doc-grid">
                     <div class="doc-card">
                         <div class="doc-card-header">
-                            <div class="doc-btn-label">Rejoin</div>
-                            <span class="doc-category-badge cat-action">Action</span>
+                            <div class="doc-btn-label">Start</div>
+                            <span class="doc-category-badge cat-success">Safe</span>
                         </div>
-                        <div class="doc-desc">Переподключить ноду к работающему кластеру после кратковременного отказа. Галера запросит IST (инкрементальный перенос транзакций) если лаг небольшой, или SST (полный снапшот) если нода сильно отстала.</div>
-                        <div class="doc-cmd">systemctl restart mariadb.service</div>
+                        <div class="doc-desc">Запустить сервис <code>mariadb.service</code> на выбранной ноде. Нода автоматически присоединяется к кластеру: через IST (инкрементальный перенос) если отставание небольшое, или через SST (полный снапшот) если нода долго отсутствовала.</div>
+                        <div class="doc-cmd">systemctl start mariadb.service</div>
                     </div>
                     <div class="doc-card">
                         <div class="doc-card-header">
                             <div class="doc-btn-label">Stop MariaDB</div>
                             <span class="doc-category-badge cat-danger">Danger</span>
                         </div>
-                        <div class="doc-desc">Штатно остановить сервис MariaDB на выбранной ноде. Нода покидает кластер, cluster_size уменьшается на 1. При 2 нодах без арбитра кластер теряет кворум и переходит в non-Primary.</div>
+                        <div class="doc-desc">Штатно остановить сервис <code>mariadb.service</code> на выбранной ноде. Нода корректно покидает кластер, <code>wsrep_cluster_size</code> уменьшается на 1. При 2 нодах без арбитра кластер теряет кворум и переходит в <em>non-Primary</em> — запись блокируется.</div>
                         <div class="doc-cmd">systemctl stop mariadb.service</div>
                         <div class="doc-note">⚠ При 2 нодах без арбитра остановка любой ноды прерывает запись в кластер.</div>
                     </div>
                     <div class="doc-card">
                         <div class="doc-card-header">
-                            <div class="doc-btn-label">Start MariaDB</div>
-                            <span class="doc-category-badge cat-success">Safe</span>
-                        </div>
-                        <div class="doc-desc">Запустить сервис MariaDB на выбранной ноде. Нода автоматически присоединяется к кластеру через IST или SST в зависимости от отставания по seqno.</div>
-                        <div class="doc-cmd">systemctl start mariadb.service</div>
-                    </div>
-                    <div class="doc-card">
-                        <div class="doc-card-header">
-                            <div class="doc-btn-label">Restart MariaDB</div>
+                            <div class="doc-btn-label">Restart</div>
                             <span class="doc-category-badge cat-warning">Warning</span>
                         </div>
-                        <div class="doc-desc">Перезапустить сервис MariaDB на ноде. Равносильно Stop + Start. Используется для применения изменений конфигурации my.cnf без перезагрузки ВМ.</div>
+                        <div class="doc-desc">Перезапустить сервис <code>mariadb.service</code> на ноде (Stop + Start). Используется для применения изменений конфигурации <code>my.cnf</code> без перезагрузки ВМ. Нода временно выходит из кластера и переподключается.</div>
                         <div class="doc-cmd">systemctl restart mariadb.service</div>
                     </div>
                     <div class="doc-card">
                         <div class="doc-card-header">
-                            <div class="doc-btn-label">Kill Process</div>
-                            <span class="doc-category-badge cat-danger">Danger</span>
+                            <div class="doc-btn-label">Rejoin</div>
+                            <span class="doc-category-badge cat-action">Action</span>
                         </div>
-                        <div class="doc-desc">Принудительно завершить процесс mysqld через SIGKILL. Использовать только если штатный Stop завис. Может привести к corruption при незавершённых транзакциях.</div>
-                        <div class="doc-cmd">kill -9 $(pidof mysqld)</div>
-                        <div class="doc-note">⚠ Только в крайнем случае. Всегда предпочитать systemctl stop.</div>
+                        <div class="doc-desc">Переподключить ноду к работающему кластеру после кратковременного отказа или ручного вмешательства. Выполняет <code>restart mariadb.service</code> — нода заново проходит handshake с кластером и синхронизируется через IST или SST.</div>
+                        <div class="doc-cmd">systemctl restart mariadb.service</div>
+                    </div>
+                    <div class="doc-card">
+                        <div class="doc-card-header">
+                            <div class="doc-btn-label">R/O — Read Only</div>
+                            <span class="doc-category-badge cat-warning">Warning</span>
+                        </div>
+                        <div class="doc-desc">Перевести ноду в режим «только чтение» (<code>read_only = ON</code>). Используется при плановых работах, миграции или для исключения ноды из записи без остановки сервиса. Репликация и мониторинг продолжают работать.</div>
+                        <div class="doc-cmd">SET GLOBAL read_only = ON;</div>
+                        <div class="doc-note">Нода остаётся в кластере и принимает репликацию, но отклоняет клиентские запросы на запись.</div>
+                    </div>
+                    <div class="doc-card">
+                        <div class="doc-card-header">
+                            <div class="doc-btn-label">R/W — Read Write</div>
+                            <span class="doc-category-badge cat-success">Safe</span>
+                        </div>
+                        <div class="doc-desc">Вернуть ноду в нормальный режим чтения/записи (<code>read_only = OFF</code>). Применяется после завершения плановых работ для включения ноды обратно в ротацию нагрузки.</div>
+                        <div class="doc-cmd">SET GLOBAL read_only = OFF;</div>
+                    </div>
+                    <div class="doc-card">
+                        <div class="doc-card-header">
+                            <div class="doc-btn-label">Ping (SSH)</div>
+                            <span class="doc-category-badge cat-info">Info</span>
+                        </div>
+                        <div class="doc-desc">Проверить SSH-доступность ноды — отправляет тестовый SSH-запрос и измеряет время отклика. Позволяет убедиться что backend может подключиться к ноде перед выполнением команд. Отображает задержку в мс или ошибку.</div>
+                        <div class="doc-cmd">ssh -o ConnectTimeout=5 user@host echo ok</div>
                     </div>
                     <div class="doc-card">
                         <div class="doc-card-header">
                             <div class="doc-btn-label">Bootstrap</div>
-                            <span class="doc-category-badge cat-warning">Warning</span>
+                            <span class="doc-category-badge cat-danger">Danger</span>
                         </div>
-                        <div class="doc-desc">Запустить кластер заново с нуля из одной ноды. Применяется только при полном отказе всех нод. Нода с наибольшим seqno в grastate.dat должна быть bootstrap-кандидатом.</div>
+                        <div class="doc-desc">Запустить кластер с нуля из одной «новой» ноды (<code>wsrep-new-cluster</code>). Применяется только при полном отказе всего кластера. Нода с наибольшим <code>seqno</code> в <code>grastate.dat</code> должна быть bootstrap-кандидатом — остальные догонят через SST.</div>
                         <div class="doc-cmd">galera_new_cluster  # или: mysqld_safe --wsrep-new-cluster</div>
-                        <div class="doc-note">⚠ Запускать строго на одной ноде с наибольшим seqno. Иначе — потеря данных.</div>
+                        <div class="doc-note">⚠ Запускать строго на одной ноде с наибольшим seqno. Иначе — split-brain и потеря данных.</div>
                     </div>
                 </div>
             </div>
@@ -1357,10 +1368,10 @@
                 <div class="doc-grid">
                     <div class="doc-card">
                         <div class="doc-card-header">
-                            <div class="doc-btn-label">Обновить</div>
+                            <div class="doc-btn-label">Обновить (кнопка в шапке)</div>
                             <span class="doc-category-badge cat-info">Info</span>
                         </div>
-                        <div class="doc-desc">Принудительно обновить все wsrep-метрики со всех нод немедленно, не дожидаясь следующего планового опроса (по умолчанию каждые 5 секунд).</div>
+                        <div class="doc-desc">Принудительно запросить все wsrep-метрики со всех нод немедленно, не дожидаясь следующего автоматического опроса. Частота авто-опроса настраивается в разделе Настройки → «Частота опроса» (от 2 до 60 сек).</div>
                         <div class="doc-cmd">SHOW GLOBAL STATUS LIKE 'wsrep_%';</div>
                     </div>
                     <div class="doc-card">
@@ -1368,7 +1379,7 @@
                             <div class="doc-btn-label">wsrep_cluster_status</div>
                             <span class="doc-category-badge cat-info">Metric</span>
                         </div>
-                        <div class="doc-desc">Статус кластера: <strong>Primary</strong> — нормальная работа, кворум есть. <strong>non-Primary</strong> — нода потеряла связь с кворумом, запись заблокирована. <strong>Disconnected</strong> — нода не в кластере.</div>
+                        <div class="doc-desc"><strong>Primary</strong> — нормальная работа, кворум есть, запись разрешена. <strong>non-Primary</strong> — нода потеряла связь с кворумом, новые транзакции блокируются. <strong>Disconnected</strong> — нода полностью не в кластере.</div>
                         <div class="doc-cmd">SHOW STATUS LIKE 'wsrep_cluster_status';</div>
                     </div>
                     <div class="doc-card">
@@ -1376,14 +1387,65 @@
                             <div class="doc-btn-label">wsrep_local_state_comment</div>
                             <span class="doc-category-badge cat-info">Metric</span>
                         </div>
-                        <div class="doc-desc">Состояние ноды: <strong>Synced</strong> — нода синхронизирована. <strong>Donor/Desynced</strong> — нода отдаёт SST другой ноде. <strong>Joiner</strong> — нода получает SST. <strong>Joined</strong> — нода получила SST, применяет IST.</div>
+                        <div class="doc-desc"><strong>Synced</strong> — нода синхронизирована, принимает чтение и запись. <strong>Donor/Desynced</strong> — нода отдаёт SST другой ноде, временно медленнее. <strong>Joiner</strong> — нода получает SST. <strong>Joined</strong> — получила SST, применяет IST-логи.</div>
+                        <div class="doc-cmd">SHOW STATUS LIKE 'wsrep_local_state_comment';</div>
                     </div>
                     <div class="doc-card">
                         <div class="doc-card-header">
                             <div class="doc-btn-label">wsrep_flow_control_paused</div>
                             <span class="doc-category-badge cat-warning">Metric</span>
                         </div>
-                        <div class="doc-desc">Доля времени, когда репликация была приостановлена из-за перегрузки медленной ноды (0.0 = норма, >0.1 = проблема). Значение &gt; 0.25 означает серьёзное отставание ноды.</div>
+                        <div class="doc-desc">Доля времени (0.0–1.0), когда репликация приостановлена из-за отставания медленной ноды. <strong>0.0</strong> = норма. <strong>&gt;0.1</strong> = есть проблема. <strong>&gt;0.25</strong> = серьёзное отставание, нужна диагностика.</div>
+                        <div class="doc-cmd">SHOW STATUS LIKE 'wsrep_flow_control_paused';</div>
+                    </div>
+                    <div class="doc-card">
+                        <div class="doc-card-header">
+                            <div class="doc-btn-label">wsrep_local_recv_queue</div>
+                            <span class="doc-category-badge cat-warning">Metric</span>
+                        </div>
+                        <div class="doc-desc">Количество транзакций в очереди на применение репликации. В норме — 0. Значение &gt;10 означает что нода не успевает применять входящие транзакции и начинает отставать от кластера.</div>
+                        <div class="doc-cmd">SHOW STATUS LIKE 'wsrep_local_recv_queue';</div>
+                    </div>
+                    <div class="doc-card">
+                        <div class="doc-card-header">
+                            <div class="doc-btn-label">wsrep_cluster_size</div>
+                            <span class="doc-category-badge cat-info">Metric</span>
+                        </div>
+                        <div class="doc-desc">Текущее количество нод в кластере, включая арбитра (garbd). Кворум достигается при <code>size &gt; total/2</code>. Для 2 нод данных + 1 арбитр: кворум = 2. При значении 1 без арбитра кластер теряет кворум.</div>
+                        <div class="doc-cmd">SHOW STATUS LIKE 'wsrep_cluster_size';</div>
+                    </div>
+                </div>
+            </div>
+
+            <!-- РЕЖИМЫ РАБОТЫ -->
+            <div class="doc-section">
+                <div class="doc-section-title">
+                    <svg width="22" height="22" viewBox="0 0 24 24" fill="none" stroke="var(--warning)" stroke-width="2"><circle cx="12" cy="12" r="10"/><line x1="12" y1="8" x2="12" y2="12"/><line x1="12" y1="16" x2="12.01" y2="16"/></svg>
+                    Режимы работы
+                </div>
+                <div class="doc-grid">
+                    <div class="doc-card">
+                        <div class="doc-card-header">
+                            <div class="doc-btn-label">MOCK — тестовый режим</div>
+                            <span class="doc-category-badge cat-warning">Mode</span>
+                        </div>
+                        <div class="doc-desc">Данные симулируются в браузере без обращения к реальным нодам. Используется для демонстрации и разработки интерфейса. Все кнопки управления нодами работают в симуляции и не выполняют реальных команд на серверах.</div>
+                        <div class="doc-note">Переключатель MOCK | REAL находится в шапке приложения.</div>
+                    </div>
+                    <div class="doc-card">
+                        <div class="doc-card-header">
+                            <div class="doc-btn-label">REAL — боевой режим</div>
+                            <span class="doc-category-badge cat-success">Mode</span>
+                        </div>
+                        <div class="doc-desc">Данные запрашиваются с реального backend API (<code>/api/status</code>). Команды управления выполняются на реальных серверах по SSH. Требует работающего backend на порту 8000 и корректно настроенного <code>nodes.yaml</code>.</div>
+                        <div class="doc-note">⚠ В этом режиме все действия необратимы и применяются на prod-инфраструктуре.</div>
+                    </div>
+                    <div class="doc-card">
+                        <div class="doc-card-header">
+                            <div class="doc-btn-label">Контур TEST / PROD</div>
+                            <span class="doc-category-badge cat-info">Info</span>
+                        </div>
+                        <div class="doc-desc">Переключение между тестовым и продуктивным контуром в шапке. В MOCK-режиме влияет только на отображение заголовка и некоторых меток. В REAL-режиме не переключает кластер физически — это просто UI-метка для ориентации оператора.</div>
                     </div>
                 </div>
             </div>
@@ -1400,7 +1462,7 @@
                             <div class="doc-btn-label">Reload nodes.yaml</div>
                             <span class="doc-category-badge cat-action">Action</span>
                         </div>
-                        <div class="doc-desc">Перечитать файл nodes.yaml с диска без перезапуска backend-сервиса. Применяет изменения в списке нод немедленно. Используется после ручного редактирования файла или после добавления/удаления ноды через UI.</div>
+                        <div class="doc-desc">Перечитать файл <code>nodes.yaml</code> с диска без перезапуска backend-сервиса. Применяет изменения в списке нод, арбитров и настроек немедленно. Используется после ручного редактирования файла или после добавления/удаления ноды через UI.</div>
                         <div class="doc-cmd">POST /api/config/reload</div>
                     </div>
                     <div class="doc-card">
@@ -1408,22 +1470,48 @@
                             <div class="doc-btn-label">Добавить ноду</div>
                             <span class="doc-category-badge cat-action">Action</span>
                         </div>
-                        <div class="doc-desc">Добавить запись о новой ноде в nodes.yaml. Укажите имя (например gc03), IP-адрес, порт MariaDB и SSH-порт. После добавления нажмите «Reload nodes.yaml» для применения.</div>
+                        <div class="doc-desc">Добавить запись о новой ноде в <code>nodes.yaml</code>. Укажите: имя (ID), IP-адрес, порт MariaDB (3306), SSH-порт, SSH-пользователь, путь к ключу и датацентр (DC). После добавления нажмите «Reload nodes.yaml» для применения без перезапуска.</div>
+                        <div class="doc-cmd">POST /api/config/node</div>
                     </div>
                     <div class="doc-card">
                         <div class="doc-card-header">
                             <div class="doc-btn-label">Удалить ноду</div>
                             <span class="doc-category-badge cat-danger">Danger</span>
                         </div>
-                        <div class="doc-desc">Удалить запись ноды из nodes.yaml и из списка мониторинга. Физически ноду из кластера Galera не выводит — только убирает из отображения. Для вывода ноды из кластера используйте Stop MariaDB на ней.</div>
+                        <div class="doc-desc">Удалить запись ноды из <code>nodes.yaml</code> и из мониторинга. Физически из Galera Cluster ноду не выводит — только прекращает мониторинг. Для полного вывода: сначала выполните Stop MariaDB на ноде, затем удалите запись.</div>
+                        <div class="doc-cmd">DELETE /api/config/node/{node_id}</div>
                     </div>
                     <div class="doc-card">
                         <div class="doc-card-header">
-                            <div class="doc-btn-label">Добавить арбитр (garbd)</div>
+                            <div class="doc-btn-label">Добавить / редактировать арбитр</div>
                             <span class="doc-category-badge cat-action">Action</span>
                         </div>
-                        <div class="doc-desc">Добавить Galera Arbitrator — лёгкий процесс, который участвует в кворуме без хранения данных. Критически важен для prod-контура с 2 нодами: при падении одной ноды арбитр сохраняет кворум.</div>
-                        <div class="doc-cmd">garbd --address gcomm://10.0.0.11:4567,10.0.0.12:4567 --group galera_cluster --log /var/log/garbd.log</div>
+                        <div class="doc-desc">Galera Arbitrator (<code>garbd</code>) — лёгкий процесс, который участвует в кворуме не храня данных. Критически важен при чётном числе нод данных: при 2 нодах арбитр сохраняет кворум при отказе одной. Поля: Имя, IP, SSH-порт, SSH-пользователь, SSH-ключ, DC.</div>
+                        <div class="doc-cmd">garbd --address gcomm://&lt;node1&gt;:4567,&lt;node2&gt;:4567 --group &lt;cluster_name&gt;</div>
+                    </div>
+                    <div class="doc-card">
+                        <div class="doc-card-header">
+                            <div class="doc-btn-label">Сохранить конфиг БД</div>
+                            <span class="doc-category-badge cat-action">Action</span>
+                        </div>
+                        <div class="doc-desc">Сохранить учётные данные для мониторинга БД (пользователь, пароль, порт) в <code>nodes.yaml</code> в секцию <code>db:</code>. Эти данные используются backend для подключения к MariaDB при опросе wsrep-метрик в Real-режиме.</div>
+                        <div class="doc-cmd">POST /api/config/db</div>
+                    </div>
+                    <div class="doc-card">
+                        <div class="doc-card-header">
+                            <div class="doc-btn-label">Частота опроса</div>
+                            <span class="doc-category-badge cat-info">Setting</span>
+                        </div>
+                        <div class="doc-desc">Интервал автоматического обновления метрик со всех нод. Доступные значения: 2, 5, 10, 30, 60 секунд. Сохраняется в <code>nodes.yaml → settings.poll_interval</code> и применяется без перезапуска. Меньший интервал — выше нагрузка на БД.</div>
+                        <div class="doc-cmd">nodes.yaml → settings.poll_interval: 5</div>
+                    </div>
+                    <div class="doc-card">
+                        <div class="doc-card-header">
+                            <div class="doc-btn-label">Предпросмотр nodes.yaml</div>
+                            <span class="doc-category-badge cat-info">Info</span>
+                        </div>
+                        <div class="doc-desc">Отображает актуальное содержимое <code>nodes.yaml</code> в том виде, в котором оно хранится на сервере. Данные берутся из <code>GET /api/config</code>. Обновляется автоматически после любых изменений конфигурации через UI.</div>
+                        <div class="doc-cmd">GET /api/config</div>
                     </div>
                 </div>
             </div>
@@ -1949,7 +2037,7 @@
                 (node.error ? '<div class="node-error-banner">⚠ ' + node.error + '</div>' : '') +
                 '<div class="node-metrics">' + metricsHtml + '</div>' +
                 '<div class="node-actions">' + rowMain + '</div>' +
-                '<div class="node-actions" style="padding-top:var(--space-1);border-top:none;margin-top:0">' + rowExtra + '</div>' +
+                '<div class="node-actions">' + rowExtra + '</div>' +
                 '</div>';
         }
 

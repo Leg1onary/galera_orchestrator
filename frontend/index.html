@@ -1027,7 +1027,7 @@
             </div>
 
             <div class="topology-wrap">
-                <svg class="topology-svg" viewBox="0 0 700 320" xmlns="http://www.w3.org/2000/svg" id="topoSvg">
+                <svg class="topology-svg" viewBox="0 0 700 360" xmlns="http://www.w3.org/2000/svg" id="topoSvg">
                     <!-- cluster ring -->
                     <ellipse cx="350" cy="160" rx="260" ry="110" fill="none" stroke-width="1.5" stroke-dasharray="6 4" id="topoRing" stroke="rgba(59,130,246,0.3)"/>
                     <!-- label cluster -->
@@ -1048,14 +1048,16 @@
                     <rect x="470" y="170" width="150" height="26" rx="6" id="topoN2Badge" style="fill:var(--success-dim)"/>
                     <text x="545" y="188" text-anchor="middle" font-family="Inter,sans-serif" font-size="12" font-weight="700" id="topoN2State" style="fill:var(--success)">SYNCED</text>
                     <!-- cluster size label -->
-                    <text x="350" y="295" text-anchor="middle" font-family="Inter,sans-serif" font-size="12" id="topoSizeLabel" style="fill:var(--text-muted)">Cluster Size: 2 · Status: Primary · Cert Failures: 0</text>
+                    <text x="350" y="350" text-anchor="middle" font-family="Inter,sans-serif" font-size="11" id="topoSizeLabel" style="fill:var(--text-muted)">Cluster Size: 2 · Status: Primary · Cert Failures: 0</text>
                     <!-- Arbitrator (PROD only, hidden by default) -->
                     <g id="topoArbRect" visibility="hidden">
-                        <rect x="275" y="240" width="150" height="70" rx="10" style="fill:var(--surface);stroke:var(--warning);stroke-width:2" id="topoArbRect"/>
-                        <text x="350" y="263" text-anchor="middle" font-family="Inter,sans-serif" font-size="13" font-weight="700" style="fill:var(--text)" id="topoArbLabel">garbd</text>
-                        <text x="350" y="279" text-anchor="middle" font-family="JetBrains Mono,monospace" font-size="10" style="fill:var(--text-muted)" id="topoArbHost">arbitrator</text>
-                        <rect x="290" y="285" width="120" height="20" rx="5" style="fill:var(--warning-dim)" id="topoArbBadge"/>
-                        <text x="350" y="299" text-anchor="middle" font-family="Inter,sans-serif" font-size="11" font-weight="700" style="fill:var(--warning)" id="topoArbState">RUNNING</text>
+                        <rect x="260" y="228" width="180" height="112" rx="12" style="fill:var(--surface);stroke:var(--warning);stroke-width:2" id="topoArbRectBg"/>
+                        <text x="350" y="252" text-anchor="middle" font-family="Inter,sans-serif" font-size="14" font-weight="700" style="fill:var(--text)" id="topoArbLabel">garbd</text>
+                        <text x="350" y="268" text-anchor="middle" font-family="JetBrains Mono,monospace" font-size="11" style="fill:var(--text-muted)" id="topoArbHost">arbitrator</text>
+                        <text x="350" y="283" text-anchor="middle" font-family="Inter,sans-serif" font-size="10" font-weight="600" style="fill:var(--primary)" id="topoArbDc"></text>
+                        <line x1="275" y1="291" x2="425" y2="291" stroke="var(--border)" stroke-width="1" opacity="0.5"/>
+                        <rect x="285" y="296" width="130" height="22" rx="6" style="fill:var(--warning-dim)" id="topoArbBadge"/>
+                        <text x="350" y="311" text-anchor="middle" font-family="Inter,sans-serif" font-size="11" font-weight="700" style="fill:var(--warning)" id="topoArbState">RUNNING</text>
                     </g>
                 </svg>
             </div>
@@ -1935,8 +1937,11 @@
 
             return '<div class="node-card ' + sc + '">' +
                 '<div class="node-header">' +
-                '<div><div class="node-name">' + node.name + '</div>' +
-                '<div class="node-host">' + (node.host || '') + ':' + (node.port || 3306) + '</div></div>' +
+                '<div>' +
+                '<div class="node-name">' + node.name + '</div>' +
+                (node.dc ? '<span style="display:inline-block;font-size:var(--text-xs);background:var(--primary-dim,rgba(1,105,111,.15));color:var(--primary);padding:1px 8px;border-radius:9999px;font-weight:600;margin-bottom:3px;letter-spacing:.03em">DC: ' + node.dc + '</span>' : '') +
+                '<div class="node-host">' + (node.host || '') + ':' + (node.port || 3306) + '</div>' +
+                '</div>' +
                 '<div style="display:flex;align-items:center;gap:6px">' + pingBadge +
                 '<span class="node-state-badge ' + bc + '">' + node.state + '</span>' +
                 '</div>' +
@@ -2029,6 +2034,7 @@
             // Арбитр — отображаем в PROD контуре
             // Arbitrators — show from arbitrators[] (no env restriction)
             var arbEl  = document.getElementById('topoArbRect');
+            var arbElBg = document.getElementById('topoArbRectBg');
             var arbLbl = document.getElementById('topoArbLabel');
             var arbs   = (clusterData.arbitrators && clusterData.arbitrators.length)
                 ? clusterData.arbitrators
@@ -2044,10 +2050,21 @@
                     var arbHostEl = document.getElementById('topoArbHost');
                     var arbOnline = firstArb.online !== false;
                     var arbColor  = arbOnline ? 'var(--success)' : 'var(--error)';
-                    arbEl.setAttribute('style', 'fill:var(--surface);stroke:' + arbColor + ';stroke-width:2');
+                    if (arbElBg) arbElBg.setAttribute('style', 'fill:var(--surface);stroke:' + arbColor + ';stroke-width:2');
+                    else arbEl.setAttribute('style', 'fill:var(--surface);stroke:' + arbColor + ';stroke-width:2');
                     if (arbBadge) arbBadge.setAttribute('style', 'fill:' + (arbOnline ? 'var(--success-dim)' : 'var(--error-dim)'));
                     if (arbState) { arbState.textContent = arbOnline ? 'RUNNING' : 'OFFLINE'; arbState.setAttribute('style', 'fill:' + arbColor); }
-                    if (arbHostEl) arbHostEl.textContent = firstArb.host + (firstArb.dc ? ' · ' + firstArb.dc : '');
+                    if (arbHostEl) arbHostEl.textContent = firstArb.host || 'arbitrator';
+                    var arbDcEl = document.getElementById('topoArbDc');
+                    if (arbDcEl) {
+                        if (firstArb.dc) {
+                            arbDcEl.textContent = 'DC: ' + firstArb.dc;
+                            arbDcEl.setAttribute('visibility', 'visible');
+                        } else {
+                            arbDcEl.textContent = '';
+                            arbDcEl.setAttribute('visibility', 'hidden');
+                        }
+                    }
                     if (arbLbl) arbLbl.textContent = arbs.length > 1 ? 'garbd ×' + arbs.length : 'garbd';
                 }
             }
@@ -2144,7 +2161,7 @@
         }
 
         // ---- SETTINGS ----
-                function renderOverviewArbitrators() {
+        function renderOverviewArbitrators() {
             var sec = document.getElementById('overviewArbSection');
             if (!sec) return;
             var arbs = (clusterData.arbitrators && clusterData.arbitrators.length)
@@ -2259,7 +2276,7 @@
             }).join('');
         }
 
-                // Merge dc/ssh/key from _configNodes cache into live clusterData.nodes
+        // Merge dc/ssh/key from _configNodes cache into live clusterData.nodes
         function _mergeConfigNodes() {
             if (!_configNodes.length) return;
             clusterData.nodes.forEach(function(nd) {
@@ -2518,18 +2535,18 @@
                             headers: { 'Content-Type': 'application/json' },
                             body: JSON.stringify({ action: action })
                         })
-                        .then(function(r) { return r.json(); })
-                        .then(function(res) {
-                            var lvl = res.ok ? 'OK' : 'ERROR';
-                            addLog(lvl, node.name + ': ' + action + ' → exit=' + res.exit_code + (res.stderr ? ' | ' + res.stderr : ''));
-                            toast(res.ok ? 'success' : 'error', node.name + ': ' + action + (res.ok ? ' ✓' : ' ✗'));
-                            setTimeout(fetchRealData, 1500);
-                        })
-                        .catch(function(e) {
-                            addLog('ERROR', node.name + ': ' + action + ' failed — ' + e.message);
-                            toast('error', action + ' failed: ' + e.message);
-                            fetchRealData();
-                        });
+                            .then(function(r) { return r.json(); })
+                            .then(function(res) {
+                                var lvl = res.ok ? 'OK' : 'ERROR';
+                                addLog(lvl, node.name + ': ' + action + ' → exit=' + res.exit_code + (res.stderr ? ' | ' + res.stderr : ''));
+                                toast(res.ok ? 'success' : 'error', node.name + ': ' + action + (res.ok ? ' ✓' : ' ✗'));
+                                setTimeout(fetchRealData, 1500);
+                            })
+                            .catch(function(e) {
+                                addLog('ERROR', node.name + ': ' + action + ' failed — ' + e.message);
+                                toast('error', action + ' failed: ' + e.message);
+                                fetchRealData();
+                            });
                     } else {
                         // Mock mode — симуляция
                         if (action === 'stop') {
@@ -2590,13 +2607,13 @@
                             headers: { 'Content-Type': 'application/json' },
                             body: JSON.stringify({ candidate: chosen })
                         })
-                        .then(function(r) { return r.json(); })
-                        .then(function(res) {
-                            addLog(res.ok ? 'OK' : 'ERROR', 'Bootstrap ' + chosen + ': ' + (res.stdout || res.error || 'done'));
-                            toast(res.ok ? 'success' : 'error', 'Bootstrap ' + (res.ok ? 'успешен ✓' : 'ошибка ✗'));
-                            setTimeout(fetchRealData, 2000);
-                        })
-                        .catch(function(e) { toast('error', 'Bootstrap failed: ' + e.message); });
+                            .then(function(r) { return r.json(); })
+                            .then(function(res) {
+                                addLog(res.ok ? 'OK' : 'ERROR', 'Bootstrap ' + chosen + ': ' + (res.stdout || res.error || 'done'));
+                                toast(res.ok ? 'success' : 'error', 'Bootstrap ' + (res.ok ? 'успешен ✓' : 'ошибка ✗'));
+                                setTimeout(fetchRealData, 2000);
+                            })
+                            .catch(function(e) { toast('error', 'Bootstrap failed: ' + e.message); });
                     } else {
                         setTimeout(function() {
                             addLog('OK', chosen + ': Primary кластер запущен. Ожидание остальных нод.');
@@ -2621,13 +2638,13 @@
                             headers: { 'Content-Type': 'application/json' },
                             body: JSON.stringify({ node_id: nodeId, method: method })
                         })
-                        .then(function(r) { return r.json(); })
-                        .then(function(res) {
-                            addLog(res.ok ? 'OK' : 'ERROR', nodeId + ': Rejoin → ' + (res.stdout || res.error || 'done'));
-                            toast(res.ok ? 'success' : 'error', nodeId + ': Rejoin ' + (res.ok ? 'успешен ✓' : 'ошибка ✗'));
-                            setTimeout(fetchRealData, 2000);
-                        })
-                        .catch(function(e) { toast('error', 'Rejoin failed: ' + e.message); });
+                            .then(function(r) { return r.json(); })
+                            .then(function(res) {
+                                addLog(res.ok ? 'OK' : 'ERROR', nodeId + ': Rejoin → ' + (res.stdout || res.error || 'done'));
+                                toast(res.ok ? 'success' : 'error', nodeId + ': Rejoin ' + (res.ok ? 'успешен ✓' : 'ошибка ✗'));
+                                setTimeout(fetchRealData, 2000);
+                            })
+                            .catch(function(e) { toast('error', 'Rejoin failed: ' + e.message); });
                     } else {
                         setTimeout(function() {
                             var node = clusterData.nodes.find(function(n) { return n.id === nodeId; });
@@ -2728,15 +2745,15 @@
                     headers: { 'Content-Type': 'application/json' },
                     body: JSON.stringify({ db_user: dbUser, db_password: dbPass })
                 })
-                .then(function(r) { return r.json(); })
-                .then(function() {
-                    toast('success', 'Конфиг БД сохранён в nodes.yaml');
-                    addLog('INFO', 'Конфигурация подключения обновлена.');
-                })
-                .catch(function(e) {
-                    toast('warning', 'Сохранено локально (API недоступен)');
-                    addLog('WARN', 'saveDbConfig API error: ' + e.message);
-                });
+                    .then(function(r) { return r.json(); })
+                    .then(function() {
+                        toast('success', 'Конфиг БД сохранён в nodes.yaml');
+                        addLog('INFO', 'Конфигурация подключения обновлена.');
+                    })
+                    .catch(function(e) {
+                        toast('warning', 'Сохранено локально (API недоступен)');
+                        addLog('WARN', 'saveDbConfig API error: ' + e.message);
+                    });
             },
 
             openAddNodeModal: function() {
@@ -2783,22 +2800,22 @@
                     headers: { 'Content-Type': 'application/json' },
                     body: JSON.stringify({ id: name, name: name, host: host, port: port, ssh_port: ssh, ssh_user: sshUser, ssh_key: sshKey })
                 })
-                .then(function(r) { return r.json(); })
-                .then(function() {
-                    clusterData.nodes.push(newNode);
-                    App.closeModal('addNodeModal');
-                    renderAll();
-                    addLog('INFO', 'Нода добавлена в nodes.yaml: ' + name + ' (' + host + ')');
-                    toast('success', 'Нода ' + name + ' добавлена');
-                })
-                .catch(function(e) {
-                    // Fallback: добавляем только в память
-                    clusterData.nodes.push(newNode);
-                    App.closeModal('addNodeModal');
-                    renderAll();
-                    addLog('WARN', 'Нода добавлена (API недоступен): ' + name + ' — ' + e.message);
-                    toast('success', 'Нода ' + name + ' добавлена (offline режим)');
-                });
+                    .then(function(r) { return r.json(); })
+                    .then(function() {
+                        clusterData.nodes.push(newNode);
+                        App.closeModal('addNodeModal');
+                        renderAll();
+                        addLog('INFO', 'Нода добавлена в nodes.yaml: ' + name + ' (' + host + ')');
+                        toast('success', 'Нода ' + name + ' добавлена');
+                    })
+                    .catch(function(e) {
+                        // Fallback: добавляем только в память
+                        clusterData.nodes.push(newNode);
+                        App.closeModal('addNodeModal');
+                        renderAll();
+                        addLog('WARN', 'Нода добавлена (API недоступен): ' + name + ' — ' + e.message);
+                        toast('success', 'Нода ' + name + ' добавлена (offline режим)');
+                    });
             },
 
             editNode: function(nodeId) {
@@ -2855,23 +2872,23 @@
                                 db_user: dbUser || undefined, db_password: dbPass || undefined
                             })
                         })
-                        .then(function(r) { return r.json(); })
-                        .then(function() {
-                            // Обновляем локальный объект
-                            var node = clusterData.nodes.find(function(n) { return n.id === origId; });
-                            if (node) {
-                                node.id = name; node.name = name; node.host = host;
-                                node.port = port; node.ssh_port = ssh; node.ssh_user = sshUser;
-                                node.db_user = dbUser; node.db_password = dbPass;
-                            }
-                            App.closeModal('editNodeModal');
-                            renderAll();
-                            addLog('INFO', 'Нода обновлена: ' + name + ' (' + host + ')');
-                            toast('success', 'Нода ' + name + ' обновлена');
-                        })
-                        .catch(function(e) {
-                            toast('error', 'Ошибка сохранения: ' + e.message);
-                        });
+                            .then(function(r) { return r.json(); })
+                            .then(function() {
+                                // Обновляем локальный объект
+                                var node = clusterData.nodes.find(function(n) { return n.id === origId; });
+                                if (node) {
+                                    node.id = name; node.name = name; node.host = host;
+                                    node.port = port; node.ssh_port = ssh; node.ssh_user = sshUser;
+                                    node.db_user = dbUser; node.db_password = dbPass;
+                                }
+                                App.closeModal('editNodeModal');
+                                renderAll();
+                                addLog('INFO', 'Нода обновлена: ' + name + ' (' + host + ')');
+                                toast('success', 'Нода ' + name + ' обновлена');
+                            })
+                            .catch(function(e) {
+                                toast('error', 'Ошибка сохранения: ' + e.message);
+                            });
                     });
             },
 
@@ -2901,31 +2918,31 @@
                         db_user: dbUser || undefined, db_password: dbPass || undefined
                     })
                 })
-                .then(function() {
-                    return fetch(apiBase + '/api/node/' + tmpId + '/test-connection');
-                })
-                .then(function(r) { return r.json(); })
-                .then(function(res) {
-                    // Удаляем временную ноду
-                    fetch(apiBase + '/api/config/node/' + tmpId, { method: 'DELETE' }).catch(function(){});
-                    if (resEl) {
-                        var ssh_ok  = res.ssh && res.ssh.ok;
-                        var db_ok   = res.db  && res.db.ok;
-                        resEl.innerHTML =
-                            '<div style="display:flex;flex-direction:column;gap:4px;font-size:var(--text-xs);margin-top:var(--space-2)">' +
-                            '<span style="color:' + (ssh_ok ? 'var(--success)' : 'var(--error)') + '">' +
+                    .then(function() {
+                        return fetch(apiBase + '/api/node/' + tmpId + '/test-connection');
+                    })
+                    .then(function(r) { return r.json(); })
+                    .then(function(res) {
+                        // Удаляем временную ноду
+                        fetch(apiBase + '/api/config/node/' + tmpId, { method: 'DELETE' }).catch(function(){});
+                        if (resEl) {
+                            var ssh_ok  = res.ssh && res.ssh.ok;
+                            var db_ok   = res.db  && res.db.ok;
+                            resEl.innerHTML =
+                                '<div style="display:flex;flex-direction:column;gap:4px;font-size:var(--text-xs);margin-top:var(--space-2)">' +
+                                '<span style="color:' + (ssh_ok ? 'var(--success)' : 'var(--error)') + '">' +
                                 (ssh_ok ? '✓' : '✗') + ' SSH: ' + (res.ssh ? res.ssh.message : '—') + '</span>' +
-                            '<span style="color:' + (db_ok  ? 'var(--success)' : 'var(--error)') + '">' +
+                                '<span style="color:' + (db_ok  ? 'var(--success)' : 'var(--error)') + '">' +
                                 (db_ok  ? '✓' : '✗') + ' MariaDB: ' + (res.db  ? res.db.message  : '—') + '</span>' +
-                            '</div>';
-                    }
-                    toast(res.ok ? 'success' : 'warning', 'Тест: SSH ' + (ssh_ok?'OK':'FAIL') + ' / DB ' + (db_ok?'OK':'FAIL'));
-                })
-                .catch(function(e) {
-                    fetch(apiBase + '/api/config/node/__test_' + Date.now(), { method: 'DELETE' }).catch(function(){});
-                    if (resEl) resEl.innerHTML = '<span style="color:var(--error);font-size:var(--text-xs)">✗ Ошибка: ' + e.message + '</span>';
-                    toast('error', 'Тест не прошёл: ' + e.message);
-                });
+                                '</div>';
+                        }
+                        toast(res.ok ? 'success' : 'warning', 'Тест: SSH ' + (ssh_ok?'OK':'FAIL') + ' / DB ' + (db_ok?'OK':'FAIL'));
+                    })
+                    .catch(function(e) {
+                        fetch(apiBase + '/api/config/node/__test_' + Date.now(), { method: 'DELETE' }).catch(function(){});
+                        if (resEl) resEl.innerHTML = '<span style="color:var(--error);font-size:var(--text-xs)">✗ Ошибка: ' + e.message + '</span>';
+                        toast('error', 'Тест не прошёл: ' + e.message);
+                    });
             },
 
             removeNode: function(nodeId) {
@@ -2973,26 +2990,26 @@
                     headers: { 'Content-Type': 'application/json' },
                     body: JSON.stringify(payload)
                 })
-                .then(function(r) { return r.json(); })
-                .then(function(res) {
-                    if (!clusterData.arbitrators) clusterData.arbitrators = [];
-                    var newArb = { id: res.id || arbId || ('arb' + Date.now()), host: host, ssh: ssh, ssh_port: ssh, dc: dc, enabled: true };
-                    var idx = clusterData.arbitrators.findIndex(function(a){ return a.id === newArb.id; });
-                    if (idx >= 0) clusterData.arbitrators[idx] = newArb; else clusterData.arbitrators.push(newArb);
-                    App.closeModal('addArbitratorModal');
-                    renderAll();
-                    addLog('INFO', 'Арбитр сохранён: ' + host + ' (' + dc + ')');
-                    toast('success', 'Арбитр garbd добавлен (' + dc + ')');
-                })
-                .catch(function(e) {
-                    if (!clusterData.arbitrators) clusterData.arbitrators = [];
-                    var newArb = { id: arbId || ('arb' + Date.now()), host: host, ssh: ssh, ssh_port: ssh, dc: dc, enabled: true };
-                    clusterData.arbitrators.push(newArb);
-                    App.closeModal('addArbitratorModal');
-                    renderAll();
-                    addLog('WARN', 'Арбитр добавлен (API недоступен): ' + e.message);
-                    toast('success', 'Арбитр garbd добавлен (offline)');
-                });
+                    .then(function(r) { return r.json(); })
+                    .then(function(res) {
+                        if (!clusterData.arbitrators) clusterData.arbitrators = [];
+                        var newArb = { id: res.id || arbId || ('arb' + Date.now()), host: host, ssh: ssh, ssh_port: ssh, dc: dc, enabled: true };
+                        var idx = clusterData.arbitrators.findIndex(function(a){ return a.id === newArb.id; });
+                        if (idx >= 0) clusterData.arbitrators[idx] = newArb; else clusterData.arbitrators.push(newArb);
+                        App.closeModal('addArbitratorModal');
+                        renderAll();
+                        addLog('INFO', 'Арбитр сохранён: ' + host + ' (' + dc + ')');
+                        toast('success', 'Арбитр garbd добавлен (' + dc + ')');
+                    })
+                    .catch(function(e) {
+                        if (!clusterData.arbitrators) clusterData.arbitrators = [];
+                        var newArb = { id: arbId || ('arb' + Date.now()), host: host, ssh: ssh, ssh_port: ssh, dc: dc, enabled: true };
+                        clusterData.arbitrators.push(newArb);
+                        App.closeModal('addArbitratorModal');
+                        renderAll();
+                        addLog('WARN', 'Арбитр добавлен (API недоступен): ' + e.message);
+                        toast('success', 'Арбитр garbd добавлен (offline)');
+                    });
             },
 
             removeArbitrator: function(arbId) {

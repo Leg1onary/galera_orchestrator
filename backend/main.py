@@ -331,6 +331,7 @@ async def delete_node(node_id: str):
 # ── ARBITRATOR ────────────────────────────────────────────────
 class ArbitratorPayload(BaseModel):
     id: Optional[str] = None
+    name: Optional[str] = None
     host: str
     ssh_port: int = 22
     ssh_user: str = "root"
@@ -364,6 +365,45 @@ async def remove_arbitrator(arb_id: str):
 @app.delete("/api/config/arbitrator")
 async def remove_arbitrator_legacy():
     cfg = load_config(); cfg["arbitrators"] = []; save_config(cfg); return {"ok": True}
+
+@app.put("/api/config/arbitrator/{arb_id}")
+async def update_arbitrator(arb_id: str, payload: ArbitratorPayload):
+    cfg  = load_config()
+    arbs = cfg.setdefault("arbitrators", [])
+    idx  = next((i for i, a in enumerate(arbs) if a.get("id") == arb_id), None)
+    if idx is None:
+        raise HTTPException(404, f"Arbitrator '{arb_id}' not found")
+    new_id   = payload.id or arb_id
+    existing = arbs[idx]
+    updated  = {**existing, **payload.model_dump(exclude_none=True), "id": new_id, "enabled": existing.get("enabled", True)}
+    arbs[idx] = updated
+    # If id changed — remove old entry and use new key
+    if new_id != arb_id:
+        arbs[idx]["id"] = new_id
+    save_config(cfg)
+    _push_event("info", f"Arbitrator updated: {new_id} ({payload.host}) DC={payload.dc}", "config")
+    return {"ok": True, "id": new_id}
+
+class DbPayload(BaseModel):
+    db_user: Optional[str] = None
+    db_password: Optional[str] = None
+    db_port: Optional[int] = None
+
+@app.post("/api/config/db")
+async def save_db_config(payload: DbPayload):
+    cfg = load_config()
+    db  = cfg.setdefault("db", {})
+    if payload.db_user     is not None: db["user"]     = payload.db_user
+    if payload.db_password is not None: db["password"] = payload.db_password
+    if payload.db_port     is not None:
+        cfg.setdefault("settings", {})["db_port"] = payload.db_port
+        # Update default port on all nodes that don't have a custom port
+        for node in cfg.get("nodes", []):
+            if not node.get("port_custom"):
+                node["port"] = payload.db_port
+    save_config(cfg)
+    _push_event("info", f"DB config updated: user={payload.db_user or '(unchanged)'}", "config")
+    return {"ok": True}
 
 # ── RELOAD ────────────────────────────────────────────────────
 async def _do_reload():

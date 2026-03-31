@@ -2737,18 +2737,28 @@
             },
 
             saveDbConfig: function() {
-                var dbUser = document.getElementById('dbUser')     ? document.getElementById('dbUser').value.trim()     : '';
-                var dbPass = document.getElementById('dbPassword') ? document.getElementById('dbPassword').value        : '';
+                var dbUser = document.getElementById('dbUser')    ? document.getElementById('dbUser').value.trim()    : '';
+                var dbPass = document.getElementById('dbPass')    ? document.getElementById('dbPass').value           : '';
+                var dbPort = document.getElementById('dbPort')    ? parseInt(document.getElementById('dbPort').value) || 3306 : 3306;
                 var apiBase = getApiBase();
-                fetch(apiBase + '/api/prefs', {
+                var payload = {};
+                if (dbUser) payload.db_user     = dbUser;
+                if (dbPass) payload.db_password = dbPass;
+                payload.db_port = dbPort;
+                fetch(apiBase + '/api/config/db', {
                     method: 'POST',
                     headers: { 'Content-Type': 'application/json' },
-                    body: JSON.stringify({ db_user: dbUser, db_password: dbPass })
+                    body: JSON.stringify(payload)
                 })
                     .then(function(r) { return r.json(); })
-                    .then(function() {
-                        toast('success', 'Конфиг БД сохранён в nodes.yaml');
-                        addLog('INFO', 'Конфигурация подключения обновлена.');
+                    .then(function(res) {
+                        if (res.ok) {
+                            toast('success', 'Конфиг БД сохранён в nodes.yaml');
+                            addLog('INFO', 'Конфигурация подключения к БД обновлена (user=' + (dbUser || 'без изменений') + ')');
+                            renderYamlPreview();
+                        } else {
+                            toast('error', 'Ошибка сохранения: ' + (res.detail || 'неизвестная'));
+                        }
                     })
                     .catch(function(e) {
                         toast('warning', 'Сохранено локально (API недоступен)');
@@ -3200,6 +3210,12 @@
         (function initFromBackend() {
             var apiBase = getApiBase();
 
+            // Синхронизируем hint сразу — до ответа бекенда, на основе localStorage
+            (function() {
+                var savedMode = (function(){ try { return localStorage.getItem('galera_data_mode'); } catch(e){ return null; } })();
+                if (savedMode) _syncModeUI(savedMode);
+            })();
+
             // P2: восстановить префы (pollInterval, тема) из /api/prefs
             fetch(apiBase + '/api/prefs')
                 .then(function(r) { return r.json(); })
@@ -3239,8 +3255,21 @@
                 .then(function(r) { return r.json(); })
                 .then(function(cfg) {
                     if (cfg.cluster)  clusterData.cluster  = cfg.cluster;
-                    if (cfg.db)       clusterData.db       = { user: cfg.db.user || '' };
-                    if (cfg.settings) clusterData.settings = cfg.settings;
+                    if (cfg.db) {
+                        clusterData.db = { user: cfg.db.user || '' };
+                        // Заполняем поля формы в настройках
+                        var dbUserEl = document.getElementById('dbUser');
+                        if (dbUserEl && cfg.db.user) dbUserEl.value = cfg.db.user;
+                        // Пароль не показываем по соображениям безопасности
+                    }
+                    if (cfg.settings) {
+                        clusterData.settings = cfg.settings;
+                        var dbPortEl = document.getElementById('dbPort');
+                        if (dbPortEl && cfg.settings.db_port) dbPortEl.value = cfg.settings.db_port;
+                        // Синхронизируем poll interval если задан
+                        var piEl = document.getElementById('pollInterval');
+                        if (piEl && cfg.settings.poll_interval) piEl.value = String(cfg.settings.poll_interval);
+                    }
                     // Store full node config for dc/ssh merge (id may include fields not in /api/status)
                     if (cfg.nodes && cfg.nodes.length) {
                         _configNodes = cfg.nodes;

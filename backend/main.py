@@ -462,6 +462,308 @@ async def set_prefs(payload: PrefsPayload):
     return {"ok": True, **prefs}
 
 # ── WEBSOCKET ─────────────────────────────────────────────────
+
+
+# ── C4: GARBD DETAILED LOG ────────────────────────────────────
+@app.get("/api/garbd/{arb_id}/log")
+async def garbd_log(arb_id: str, lines: int = 30):
+    """SSH: journalctl -u garbd last N lines + parse cluster connectivity."""
+    cfg = load_config()
+    use_mock = cfg.get("settings", {}).get("use_mock", True)
+
+    arbs = cfg.get("arbitrators", [])
+    if not arbs:
+        oa = cfg.get("arbitrator", {})
+        if oa.get("host"): arbs = [{"id": "arb01", **oa}]
+    arb = next((a for a in arbs if a.get("id") == arb_id), None)
+    if not arb:
+        raise HTTPException(404, f"Arbitrator '{arb_id}' not found")
+
+    if use_mock:
+        mock_log = [
+            "Apr 01 02:00:01 garbd[1234]: Connecting to cluster at gcomm://11.11.11.169:4567,11.11.11.170:4567",
+            "Apr 01 02:00:01 garbd[1234]: Established connection to cluster",
+            "Apr 01 02:00:02 garbd[1234]: Node state: SYNCED",
+            "Apr 01 02:01:00 garbd[1234]: Flow control: state=CLEAR, paused=0",
+            "Apr 01 02:02:00 garbd[1234]: Members: 3 (2 nodes + 1 arbitrator)",
+        ]
+        return {
+            "arb_id": arb_id,
+            "host": arb.get("host",""),
+            "service_status": "active",
+            "connected_to_cluster": True,
+            "log_lines": mock_log,
+            "mock": True
+        }
+
+    try:
+        import paramiko
+    except ImportError:
+        raise HTTPException(500, "paramiko not installed")
+
+    try:
+        client = paramiko.SSHClient()
+        client.set_missing_host_key_policy(paramiko.AutoAddPolicy())
+        client.connect(
+            arb.get("host"), port=int(arb.get("ssh_port", 22)),
+            username=arb.get("ssh_user", "root"),
+            key_filename=str(Path(arb.get("ssh_key", "~/.ssh/id_rsa")).expanduser()),
+            timeout=8
+        )
+
+        # 1. Service status
+        _, so, _ = client.exec_command("systemctl is-active garbd", timeout=5)
+        service_status = so.read().decode(errors="replace").strip()
+
+        # 2. Journal log
+        _, so2, _ = client.exec_command(
+            f"journalctl -u garbd --no-pager -n {lines} --output=short-iso 2>/dev/null || "
+            f"journalctl -u garbd --no-pager -n {lines} 2>/dev/null || "
+            f"tail -n {lines} /var/log/garbd.log 2>/dev/null || echo 'Log not available'",
+            timeout=10
+        )
+        raw_log = so2.read().decode(errors="replace").strip()
+        log_lines = [l for l in raw_log.splitlines() if l.strip()][-lines:]
+
+        # 3. Check cluster connectivity from log
+        connected = any(
+            kw in raw_log
+            for kw in ["Established connection", "SYNCED", "evs::proto", "Connected", "joined cluster"]
+        )
+        disconnected = any(
+            kw in raw_log
+            for kw in ["Failed to connect", "Timeout", "Connection refused", "error", "failed"]
+        )
+
+        client.close()
+        return {
+            "arb_id": arb_id,
+            "host": arb.get("host", ""),
+            "service_status": service_status,
+            "connected_to_cluster": connected and not disconnected,
+            "log_lines": log_lines,
+            "mock": False
+        }
+    except Exception as e:
+        raise HTTPException(502, f"SSH error on arbitrator {arb_id}: {e}")
+
+
+# ── C5: PROCESSLIST ───────────────────────────────────────────
+@app.get("/api/node/{node_id}/processlist")
+async def node_processlist(node_id: str):
+    """SHOW FULL PROCESSLIST on the specified node."""
+    cfg = load_config()
+    use_mock = cfg.get("settings", {}).get("use_mock", True)
+    node = next((n for n in cfg.get("nodes", []) if n["id"] == node_id), None)
+    if not node:
+        raise HTTPException(404, f"Node '{node_id}' not found")
+
+    if use_mock:
+        import random, time
+        mock_proc = [
+            {"Id":1,"User":"monitor_user","Host":"localhost","db":"information_schema","Command":"Query","Time":0,"State":"","Info":"SHOW FULL PROCESSLIST"},
+            {"Id":42,"User":"app_user","Host":"10.0.0.5:54321","db":"mydb","Command":"Query","Time":3,"State":"Sending data","Info":"SELECT COUNT(*) FROM orders WHERE status='pending'"},
+            {"Id":77,"User":"app_user","Host":"10.0.0.6:55001","db":"mydb","Command":"Sleep","Time":12,"State":"","Info":None},
+        ]
+        return {"node_id": node_id, "processes": mock_proc, "total": len(mock_proc), "mock": True}
+
+    db_host = node.get("host", "localhost")
+    db_port = int(node.get("port", 3306))
+    db_user = node.get("db_user") or cfg.get("db", {}).get("user", "monitor_user")
+    db_pass = node.get("db_password") or cfg.get("db", {}).get("password", "")
+
+    try:
+        import pymysql
+    except ImportError:
+        raise HTTPException(500, "pymysql not installed")
+
+    try:
+        conn = pymysql.connect(
+            host=db_host, port=db_port, user=db_user, password=db_pass,
+            database="information_schema", connect_timeout=6,
+            cursorclass=pymysql.cursors.DictCursor
+        )
+        with conn.cursor() as cur:
+            cur.execute("SHOW FULL PROCESSLIST")
+            rows = cur.fetchall()
+        conn.close()
+        processes = [
+            {
+                "Id": r.get("Id") or r.get("id"),
+                "User": r.get("User") or r.get("user"),
+                "Host": r.get("Host") or r.get("host"),
+                "db": r.get("db"),
+                "Command": r.get("Command") or r.get("command"),
+                "Time": int(r.get("Time") or r.get("time") or 0),
+                "State": r.get("State") or r.get("state") or "",
+                "Info": r.get("Info") or r.get("info"),
+            }
+            for r in rows
+        ]
+        return {"node_id": node_id, "processes": processes, "total": len(processes), "mock": False}
+    except Exception as e:
+        raise HTTPException(502, f"DB error on {node_id}: {e}")
+
+
+class KillQueryPayload(BaseModel):
+    process_id: int
+
+@app.post("/api/node/{node_id}/kill-query")
+async def node_kill_query(node_id: str, payload: KillQueryPayload):
+    """KILL QUERY {id} on a node."""
+    cfg = load_config()
+    use_mock = cfg.get("settings", {}).get("use_mock", True)
+    node = next((n for n in cfg.get("nodes", []) if n["id"] == node_id), None)
+    if not node:
+        raise HTTPException(404, f"Node '{node_id}' not found")
+
+    if use_mock:
+        _push_event("warning", f"[Mock] KILL QUERY {payload.process_id} on {node_id}", "processlist")
+        return {"ok": True, "mock": True, "killed": payload.process_id}
+
+    db_host = node.get("host", "localhost")
+    db_port = int(node.get("port", 3306))
+    db_user = node.get("db_user") or cfg.get("db", {}).get("user", "monitor_user")
+    db_pass = node.get("db_password") or cfg.get("db", {}).get("password", "")
+
+    try:
+        import pymysql
+    except ImportError:
+        raise HTTPException(500, "pymysql not installed")
+
+    try:
+        conn = pymysql.connect(
+            host=db_host, port=db_port, user=db_user, password=db_pass,
+            connect_timeout=6
+        )
+        with conn.cursor() as cur:
+            cur.execute(f"KILL QUERY {int(payload.process_id)}")
+        conn.close()
+        _push_event("warning", f"KILL QUERY {payload.process_id} executed on {node_id}", "processlist")
+        return {"ok": True, "mock": False, "killed": payload.process_id}
+    except Exception as e:
+        raise HTTPException(502, f"DB error on {node_id}: {e}")
+
+
+# ── C6: GALERA.CNF COMPARISON ─────────────────────────────────
+@app.get("/api/config/compare-galera-cnf")
+async def compare_galera_cnf():
+    """SSH grep wsrep_ + innodb_ from galera.cnf on all nodes and compare."""
+    cfg = load_config()
+    use_mock = cfg.get("settings", {}).get("use_mock", True)
+    nodes = [n for n in cfg.get("nodes", []) if n.get("enabled", True)]
+
+    if use_mock:
+        mock_result = {}
+        for node in nodes:
+            nid = node["id"]
+            mock_result[nid] = {
+                "ok": True,
+                "host": node.get("host",""),
+                "config": {
+                    "wsrep_cluster_name": "test-cluster",
+                    "wsrep_cluster_address": "gcomm://11.11.11.169,11.11.11.170",
+                    "wsrep_sst_method": "rsync",
+                    "wsrep_provider": "/usr/lib/galera/libgalera_smm.so",
+                    "wsrep_node_address": node.get("host",""),
+                    "innodb_flush_log_at_trx_commit": "0",
+                    "innodb_autoinc_lock_mode": "2",
+                }
+            }
+        # Специально создаём расхождение для демо
+        if nodes:
+            last_id = nodes[-1]["id"]
+            mock_result[last_id]["config"]["wsrep_sst_method"] = "mariabackup"
+
+        all_keys = set()
+        for v in mock_result.values():
+            all_keys.update(v.get("config", {}).keys())
+
+        diffs = {}
+        for key in sorted(all_keys):
+            vals = {nid: mock_result[nid].get("config", {}).get(key) for nid in mock_result}
+            unique_vals = set(v for v in vals.values() if v is not None)
+            diffs[key] = {"values": vals, "match": len(unique_vals) <= 1}
+
+        return {"nodes": list(mock_result.keys()), "details": mock_result, "diff": diffs, "mock": True}
+
+    try:
+        import paramiko
+    except ImportError:
+        raise HTTPException(500, "paramiko not installed")
+
+    CNF_CANDIDATES = [
+        "/etc/mysql/mariadb.conf.d/galera.cnf",
+        "/etc/mysql/conf.d/galera.cnf",
+        "/etc/mysql/galera.cnf",
+        "/etc/galera/galera.cnf",
+    ]
+
+    def parse_cnf_output(text: str) -> dict:
+        """Parse key=value lines from grep output."""
+        result = {}
+        for line in text.splitlines():
+            line = line.strip()
+            if not line or line.startswith("#"): continue
+            if "=" in line:
+                k, _, v = line.partition("=")
+                result[k.strip()] = v.strip()
+        return result
+
+    node_results = {}
+    for node in nodes:
+        nid = node["id"]
+        try:
+            client = paramiko.SSHClient()
+            client.set_missing_host_key_policy(paramiko.AutoAddPolicy())
+            client.connect(
+                node.get("host"), port=int(node.get("ssh_port", 22)),
+                username=node.get("ssh_user", "root"),
+                key_filename=str(Path(node.get("ssh_key", "~/.ssh/id_rsa")).expanduser()),
+                timeout=8
+            )
+            # Try each CNF path
+            found_cnf = None
+            for cnf_path in CNF_CANDIDATES:
+                _, so, _ = client.exec_command(f"test -f {cnf_path} && echo exists", timeout=4)
+                if "exists" in so.read().decode():
+                    found_cnf = cnf_path
+                    break
+
+            if not found_cnf:
+                node_results[nid] = {"ok": False, "host": node.get("host",""), "error": "galera.cnf not found", "config": {}}
+                client.close()
+                continue
+
+            _, so, _ = client.exec_command(
+                f"grep -E '^[[:space:]]*(wsrep_|innodb_flush|innodb_autoinc|innodb_locks)' {found_cnf} 2>/dev/null",
+                timeout=8
+            )
+            raw = so.read().decode(errors="replace").strip()
+            client.close()
+            node_results[nid] = {
+                "ok": True,
+                "host": node.get("host",""),
+                "cnf_path": found_cnf,
+                "config": parse_cnf_output(raw)
+            }
+        except Exception as e:
+            node_results[nid] = {"ok": False, "host": node.get("host",""), "error": str(e), "config": {}}
+
+    # Build diff matrix
+    all_keys = set()
+    for v in node_results.values():
+        all_keys.update(v.get("config", {}).keys())
+
+    diffs = {}
+    for key in sorted(all_keys):
+        vals = {nid: node_results[nid].get("config", {}).get(key) for nid in node_results}
+        unique_vals = set(v for v in vals.values() if v is not None)
+        diffs[key] = {"values": vals, "match": len(unique_vals) <= 1}
+
+    return {"nodes": list(node_results.keys()), "details": node_results, "diff": diffs, "mock": False}
+
+
 @app.websocket("/ws/cluster")
 async def ws_cluster(ws: WebSocket):
     await ws.accept()

@@ -223,18 +223,51 @@ async def list_nodes():
 
 @app.get("/api/node/{node_id}/test-connection")
 async def test_node_connection(node_id: str):
-    """SSH: quick connectivity check — runs 'echo ok' via paramiko."""
+    """SSH + DB connectivity check.
+
+    Returns ``{ok, ssh: {ok, message}, db: {ok, message}}`` so the UI can
+    display separate SSH and MariaDB status lines.
+    """
     cfg   = load_config()
     nodes = cfg.get("nodes", [])
     node  = next((n for n in nodes if n["id"] == node_id), None)
     if not node:
         raise HTTPException(404, f"Node '{node_id}' not found")
+
+    # ── SSH check ────────────────────────────────────────────
     try:
         [(ec, out, err)] = ssh_run(node, "echo ok", timeout=8)
-        ok = ec == 0 and out.strip() == "ok"
-        return {"ok": ok, "msg": out or err}
+        ssh_ok  = ec == 0 and out.strip() == "ok"
+        ssh_msg = "Connected" if ssh_ok else (err or out or "Failed")
     except Exception as e:
-        return {"ok": False, "msg": str(e)}
+        ssh_ok  = False
+        ssh_msg = str(e)
+
+    # ── DB check ─────────────────────────────────────────────
+    db_ok  = False
+    db_msg = "Not tested"
+    try:
+        import pymysql
+        db_cfg   = cfg.get("db", {})
+        db_port  = int(node.get("port") or node.get("db_port") or 3306)
+        db_user  = node.get("db_user")     or db_cfg.get("user",     "root")
+        db_pass  = node.get("db_password") or node.get("db_pass") or db_cfg.get("password", "")
+        conn = pymysql.connect(
+            host=node.get("host"), port=db_port,
+            user=db_user, password=db_pass,
+            connect_timeout=4,
+        )
+        conn.close()
+        db_ok  = True
+        db_msg = "Connected"
+    except Exception as e:
+        db_msg = str(e)
+
+    return {
+        "ok":  ssh_ok,
+        "ssh": {"ok": ssh_ok, "message": ssh_msg},
+        "db":  {"ok": db_ok,  "message": db_msg},
+    }
 
 
 class NodeActionRequest(BaseModel):
@@ -311,11 +344,23 @@ async def add_node(node: NodeConfig):
     nodes = cfg.get("nodes", [])
     if any(n["id"] == node.id for n in nodes):
         raise HTTPException(409, f"Node '{node.id}' already exists")
-    nodes.append(node.dict())
+    node_dict = {
+        "id":          node.id,
+        "name":        node.label,        # NodeConfig.label  → YAML name
+        "host":        node.host,
+        "port":        node.db_port,      # NodeConfig.db_port → YAML port
+        "ssh_port":    node.ssh_port,
+        "ssh_user":    node.ssh_user,
+        "ssh_key":     node.ssh_key,
+        "db_user":     node.db_user,
+        "db_password": node.db_pass,      # NodeConfig.db_pass → YAML db_password
+        "enabled":     node.enabled,
+    }
+    nodes.append(node_dict)
     cfg["nodes"] = nodes
     save_config(cfg)
     _push_event("info", f"Node added: {node.id} ({node.host})", "ui")
-    return {"ok": True, "node": node.dict()}
+    return {"ok": True, "node": node_dict}
 
 @app.delete("/api/config/node/{node_id}")
 async def delete_node(node_id: str):

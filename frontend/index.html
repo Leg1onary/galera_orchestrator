@@ -618,6 +618,11 @@
             background: var(--surface-2);
             color: var(--text);
         }
+        /* H-4: force select value color in light theme — fixes white-on-white */
+        [data-theme="light"] select.form-input {
+            color: var(--text) !important;
+            background-color: var(--surface-2) !important;
+        }
         .form-row { display: grid; grid-template-columns: 1fr 1fr; gap: var(--space-4); }
         .form-hint { font-size: var(--text-xs); color: var(--text-muted); margin-top: var(--space-1); }
         .form-section {
@@ -1042,7 +1047,7 @@
             padding: var(--space-3) var(--space-5);
             margin-bottom: var(--space-6);
             font-size: var(--text-sm);
-            flex-wrap: nowrap;
+            flex-wrap: wrap;
         }
         #updateBanner.visible {
             display: flex;
@@ -1136,7 +1141,7 @@
 
         <div class="header-spacer"></div>
 
-        <div style="display:flex;align-items:center;gap:var(--space-3);flex-wrap:wrap;min-width:0;overflow:hidden">
+        <div style="display:flex;align-items:center;gap:var(--space-3);flex-wrap:wrap;min-width:0">
 
             <!-- ENV switcher: TEST / PROD -->
             <div style="display:flex;align-items:center;gap:3px;background:var(--surface-2);border:1px solid var(--border);border-radius:var(--radius-full);padding:3px">

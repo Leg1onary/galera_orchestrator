@@ -2804,7 +2804,7 @@
             nodes: [
                 {
                     id: 'gc01', name: 'gc01', host: '10.0.0.11', port: 3306, ssh: 22,
-                    role: 'node', state: 'Synced',
+                    role: 'node', state: 'Synced', read_only: false,
                     metrics: {
                         wsrep_cluster_status: 'Primary', wsrep_cluster_size: '2',
                         wsrep_connected: 'ON', wsrep_ready: 'ON',
@@ -2817,7 +2817,7 @@
                 },
                 {
                     id: 'gc02', name: 'gc02', host: '10.0.0.12', port: 3306, ssh: 22,
-                    role: 'node', state: 'Synced',
+                    role: 'node', state: 'Synced', read_only: false,
                     metrics: {
                         wsrep_cluster_status: 'Primary', wsrep_cluster_size: '2',
                         wsrep_connected: 'ON', wsrep_ready: 'ON',
@@ -2830,7 +2830,13 @@
                 }
             ],
             arbitrator: null,
-            arbitrators: [],
+            arbitrators: [
+                {
+                    id: 'arb_dc1', host: '10.0.0.14', ssh_port: 22,
+                    ssh_user: 'root', ssh_key: '~/.ssh/id_rsa',
+                    dc: 'DC1', enabled: true
+                }
+            ],
         };
 
         function makeMockData() {

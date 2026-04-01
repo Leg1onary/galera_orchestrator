@@ -50,6 +50,7 @@ def node_status(node_id: str, node: dict) -> dict:
         "wsrep_incoming_addresses":  ",".join([node.get("host","10.0.0.10") + ":4567"] + ["10.0.0.1%d:4567" % x for x in range(1, 3)]),
         "wsrep_gcomm_uuid":          _seqno[node_id]["uuid"] if node_id in _seqno else "5a7b1c2d-dead-beef-cafe-0123456789ab",
         "wsrep_protocol_version":    "9",
+        "read_only":             False,
         "online": True,
         "error":  None,
     }

@@ -1140,6 +1140,170 @@ async def clear_log():
     _push_event("info", "Event log cleared by user", "ui")
     return {"ok": True}
 
+
+# ── DISK / SYSTEM HEALTH ─────────────────────────────────────
+@app.get("/api/diagnostics/system-health")
+async def diagnostics_system_health():
+    """SSH: collect df/free/uptime for every node in parallel.
+    Returns per-node disk, memory, and load metrics with threshold flags.
+    Thresholds: disk_warn=80%, disk_crit=90%; mem_warn=85%, mem_crit=95%.
+    """
+    import concurrent.futures, re as _re
+
+    cfg      = load_config()
+    use_mock = cfg.get("settings", {}).get("use_mock", True)
+    nodes    = [n for n in cfg.get("nodes", []) if n.get("enabled", True)]
+
+    if not nodes:
+        return {"results": [], "all_ok": True, "checked_at": __import__("time").strftime("%H:%M:%S")}
+
+    if use_mock:
+        import random, time as _t
+        mock_results = []
+        for n in nodes:
+            disk_pct = random.randint(40, 75)
+            mem_pct  = random.randint(30, 65)
+            mock_results.append({
+                "node_id": n["id"], "name": n.get("name", n["id"]), "host": n.get("host", ""),
+                "ok": True,
+                "disk_data":  {"path": "/var/lib/mysql", "used_pct": disk_pct, "used": f"{random.randint(10,80)}G", "avail": f"{random.randint(20,120)}G", "total": "200G"},
+                "disk_root":  {"path": "/",              "used_pct": random.randint(20, 60), "used": f"{random.randint(5,30)}G",  "avail": f"{random.randint(30,80)}G",  "total": "100G"},
+                "memory":     {"used_pct": mem_pct, "used": f"{random.randint(2,12)}G", "total": f"{random.randint(16,64)}G", "free": f"{random.randint(1,8)}G"},
+                "load_avg":   {"1m": round(random.uniform(0.1, 2.5), 2), "5m": round(random.uniform(0.1, 2.0), 2), "15m": round(random.uniform(0.1, 1.5), 2)},
+                "uptime":     f"up {random.randint(1, 300)} days",
+                "warn": disk_pct >= 80 or mem_pct >= 85,
+                "crit": disk_pct >= 90 or mem_pct >= 95,
+                "mock": True,
+            })
+        return {"results": mock_results, "all_ok": all(not r["crit"] for r in mock_results), "checked_at": _t.strftime("%H:%M:%S"), "mock": True}
+
+    try:
+        import paramiko
+    except ImportError:
+        raise HTTPException(500, "paramiko not installed")
+
+    def _parse_df(line: str) -> dict:
+        """Parse a single df -h output line: Filesystem Size Used Avail Use% Mountpoint"""
+        parts = line.split()
+        if len(parts) < 6:
+            return {}
+        pct_str = parts[4].rstrip("%")
+        try:
+            pct = int(pct_str)
+        except ValueError:
+            pct = 0
+        return {"path": parts[5], "total": parts[1], "used": parts[2], "avail": parts[3], "used_pct": pct}
+
+    def _parse_free(output: str) -> dict:
+        """Parse free -h output; return used_pct, used, free, total."""
+        for line in output.splitlines():
+            if line.lower().startswith("mem:"):
+                parts = line.split()
+                if len(parts) >= 3:
+                    total_str = parts[1]
+                    used_str  = parts[2]
+                    free_str  = parts[3] if len(parts) > 3 else "?"
+                    # Convert to MB for % calc (strip G/M suffix)
+                    def _mb(s):
+                        s = s.strip()
+                        try:
+                            if s.endswith("G") or s.endswith("Gi"): return float(s.rstrip("GiB")) * 1024
+                            if s.endswith("M") or s.endswith("Mi"): return float(s.rstrip("MiB"))
+                            return float(s)
+                        except Exception: return 0
+                    t_mb = _mb(total_str)
+                    u_mb = _mb(used_str)
+                    pct  = int(u_mb / t_mb * 100) if t_mb > 0 else 0
+                    return {"total": total_str, "used": used_str, "free": free_str, "used_pct": pct}
+        return {"total": "?", "used": "?", "free": "?", "used_pct": 0}
+
+    def _parse_uptime(output: str) -> dict:
+        """Parse uptime output for load averages."""
+        m = _re.search(r"load average[s]?:\s*([\d.]+)[,\s]+([\d.]+)[,\s]+([\d.]+)", output)
+        uptime_m = _re.search(r"up\s+(.+?),\s+\d+ user", output)
+        return {
+            "1m":  float(m.group(1)) if m else 0.0,
+            "5m":  float(m.group(2)) if m else 0.0,
+            "15m": float(m.group(3)) if m else 0.0,
+        }, (uptime_m.group(1).strip() if uptime_m else output.strip()[:40])
+
+    DISK_WARN = 80
+    DISK_CRIT = 90
+    MEM_WARN  = 85
+    MEM_CRIT  = 95
+
+    def _check_node(node: dict) -> dict:
+        nid = node["id"]
+        out = {
+            "node_id": nid, "name": node.get("name", nid), "host": node.get("host", ""),
+            "ok": False, "disk_data": {}, "disk_root": {}, "memory": {},
+            "load_avg": {}, "uptime": "", "warn": False, "crit": False, "mock": False,
+            "error": None,
+        }
+        try:
+            client = paramiko.SSHClient()
+            client.set_missing_host_key_policy(paramiko.AutoAddPolicy())
+            client.connect(
+                node.get("host"), port=int(node.get("ssh_port", 22)),
+                username=node.get("ssh_user", "root"),
+                key_filename=str(Path(node.get("ssh_key", "~/.ssh/id_rsa")).expanduser()),
+                timeout=8,
+            )
+            try:
+                cmds = {
+                    "df_data": "df -h /var/lib/mysql 2>/dev/null | tail -1",
+                    "df_root": "df -h / 2>/dev/null | tail -1",
+                    "free":    "free -h 2>/dev/null",
+                    "uptime":  "uptime 2>/dev/null",
+                }
+                raw = {}
+                for key, cmd in cmds.items():
+                    _, so, _ = client.exec_command(cmd, timeout=6)
+                    raw[key] = so.read().decode(errors="replace").strip()
+            finally:
+                client.close()
+
+            out["disk_data"] = _parse_df(raw.get("df_data", ""))
+            out["disk_root"] = _parse_df(raw.get("df_root", ""))
+            out["memory"]    = _parse_free(raw.get("free", ""))
+            load_dict, uptime_str = _parse_uptime(raw.get("uptime", ""))
+            out["load_avg"]  = load_dict
+            out["uptime"]    = uptime_str
+            out["ok"]        = True
+
+            # Compute alert flags
+            d_pct = out["disk_data"].get("used_pct", 0)
+            r_pct = out["disk_root"].get("used_pct", 0)
+            m_pct = out["memory"].get("used_pct", 0)
+            out["warn"] = d_pct >= DISK_WARN or r_pct >= DISK_WARN or m_pct >= MEM_WARN
+            out["crit"] = d_pct >= DISK_CRIT or r_pct >= DISK_CRIT or m_pct >= MEM_CRIT
+
+        except Exception as e:
+            out["error"] = str(e)
+        return out
+
+    import time as _t
+    with concurrent.futures.ThreadPoolExecutor(max_workers=min(len(nodes), 8)) as pool:
+        futures  = {pool.submit(_check_node, n): n for n in nodes}
+        results  = [f.result() for f in concurrent.futures.as_completed(futures)]
+
+    crit_count = sum(1 for r in results if r["crit"])
+    warn_count = sum(1 for r in results if r["warn"] and not r["crit"])
+    all_ok     = not crit_count and not warn_count
+
+    _push_event(
+        "error"   if crit_count else "warning" if warn_count else "info",
+        f"system-health: " + (
+            f"{crit_count} CRIT, {warn_count} WARN" if not all_ok else "all OK"
+        ),
+        "diagnostics",
+        )
+    return {
+        "results": results, "all_ok": all_ok,
+        "crit_count": crit_count, "warn_count": warn_count,
+        "checked_at": _t.strftime("%H:%M:%S"),
+    }
+
 # ── SEQNO / GRASTATE ANALYSIS ────────────────────────────────
 @app.get("/api/seqno")
 async def get_seqno():
@@ -1568,6 +1732,110 @@ async def wsrep_recover(node_id: str):
     except Exception as e:
         log.error(f"wsrep-recover {node_id}: {e}")
         raise HTTPException(502, f"SSH error: {e}")
+
+
+# ── WSREP_RECOVER — BATCH (all nodes) ────────────────────────
+@app.post("/api/wsrep-recover-all")
+async def wsrep_recover_all():
+    """Run mysqld --wsrep-recover on ALL nodes in parallel.
+    MariaDB must be STOPPED on every node before calling this.
+    Returns per-node seqno + auto-selected bootstrap candidate (highest seqno).
+    """
+    cfg      = load_config()
+    use_mock = cfg.get("settings", {}).get("use_mock", True)
+    nodes    = cfg.get("nodes", [])
+
+    if not nodes:
+        raise HTTPException(400, "No nodes configured")
+
+    if use_mock:
+        import random, time
+        base = 485700 + random.randint(0, 100)
+        results = []
+        for i, n in enumerate(nodes):
+            seqno = base + random.randint(0, 80) if i > 0 else base + 120
+            results.append({
+                "node_id": n["id"], "name": n.get("name", n["id"]),
+                "host": n.get("host", ""),
+                "ok": True, "seqno": seqno,
+                "uuid": "5a7b1c2d-dead-beef-cafe-0123456789ab",
+                "message": f"[mock] Recovered position: 5a7b1c2d-dead-beef-cafe-0123456789ab:{seqno}",
+            })
+        best = max(results, key=lambda r: r["seqno"])
+        _push_event("info", f"[Mock] wsrep-recover-all: candidate={best['node_id']} seqno={best['seqno']}", "recovery")
+        return {
+            "ok": True, "mock": True,
+            "results": results,
+            "candidate": best["node_id"],
+            "candidate_seqno": best["seqno"],
+        }
+
+    try:
+        import paramiko, re, concurrent.futures
+    except ImportError:
+        raise HTTPException(500, "paramiko not installed")
+
+    def _recover_node(node: dict) -> dict:
+        nid = node["id"]
+        result = {
+            "node_id": nid, "name": node.get("name", nid),
+            "host": node.get("host", ""),
+            "ok": False, "seqno": -1, "uuid": "unknown",
+            "raw": "", "message": "",
+        }
+        try:
+            client = paramiko.SSHClient()
+            client.set_missing_host_key_policy(paramiko.AutoAddPolicy())
+            client.connect(
+                node.get("host"), port=int(node.get("ssh_port", 22)),
+                username=node.get("ssh_user", "root"),
+                key_filename=str(Path(node.get("ssh_key", "~/.ssh/id_rsa")).expanduser()),
+                timeout=10,
+            )
+            try:
+                cmd = "mysqld --wsrep-recover 2>&1 | grep -E 'Recovered position|WSREP: Recovered' | tail -1"
+                _, so, _ = client.exec_command(cmd, timeout=90)
+                output = so.read().decode(errors="replace").strip()
+            finally:
+                client.close()
+
+            m = re.search(r'Recovered position.*?([0-9a-f-]{36}):(-?\d+)', output, re.IGNORECASE)
+            if m:
+                result["uuid"]  = m.group(1)
+                result["seqno"] = int(m.group(2))
+                result["ok"]    = True
+            result["raw"]     = output
+            result["message"] = f"Recovered position: {result['uuid']}:{result['seqno']}"
+        except Exception as e:
+            result["message"] = str(e)
+        return result
+
+    max_workers = min(len(nodes), 8)
+    with concurrent.futures.ThreadPoolExecutor(max_workers=max_workers) as pool:
+        futures = {pool.submit(_recover_node, n): n for n in nodes}
+        results = [f.result() for f in concurrent.futures.as_completed(futures)]
+
+    ok_results = [r for r in results if r["ok"] and r["seqno"] >= 0]
+    if ok_results:
+        best = max(ok_results, key=lambda r: r["seqno"])
+    else:
+        best = None
+
+    _push_event(
+        "info" if best else "error",
+        "wsrep-recover-all: " + (
+            f"candidate={best['node_id']} seqno={best['seqno']}" if best
+            else "no node returned valid seqno"
+        ),
+        "recovery",
+        )
+    return {
+        "ok": bool(best),
+        "mock": False,
+        "results": results,
+        "candidate":       best["node_id"]  if best else None,
+        "candidate_seqno": best["seqno"]    if best else -1,
+    }
 
 # ── GARBD STATUS ─────────────────────────────────────────────
 @app.get("/api/garbd")

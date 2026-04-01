@@ -1174,6 +1174,7 @@
                             wsrep-recover (seqno=-1)
                         </button>
                     </div>
+                    <div id="wsrepRecoverResultsTable"></div>
                     <button class="btn btn-warning btn-lg" style="width:100%" onclick="App.doBootstrap()">
                         <svg width="18" height="18" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2"><polygon points="5 3 19 12 5 21 5 3"/></svg>
                         Запустить galera_new_cluster
@@ -1490,6 +1491,41 @@
                 <div id="cnfCompareContainer">
                     <div style="padding:var(--space-8);text-align:center;color:var(--color-text-muted);font-size:var(--text-sm)">
                         Нажмите «Сравнить» — будет выполнен SSH grep wsrep на все ноды
+                    </div>
+                </div>
+            </div>
+
+            <!-- SST Progress Monitor -->
+            <div class="card" id="sstMonitorCard" style="margin-top:var(--space-6);display:none">
+                <div class="card-header">
+                    <div class="card-title">
+                        <svg width="16" height="16" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2"><polyline points="23 4 23 10 17 10"/><path d="M20.49 15a9 9 0 1 1-.02-8.49"/></svg>
+                        SST / IST — Прогресс синхронизации
+                        <span id="sstMonitorBadge" style="display:inline-block;font-size:var(--text-xs);background:var(--color-warning);color:#fff;padding:1px 8px;border-radius:9999px;font-weight:700;margin-left:8px">ACTIVE</span>
+                    </div>
+                    <span style="font-size:0.72rem;color:var(--color-text-muted)">Авто-обновление каждые 3 сек пока нода в состоянии Joiner</span>
+                </div>
+                <div id="sstMonitorBody" style="padding:var(--space-4)"></div>
+            </div>
+
+            <!-- System Health -->
+            <div class="card" style="margin-top:var(--space-6)">
+                <div class="card-header">
+                    <div class="card-title">
+                        <svg width="16" height="16" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2"><rect x="2" y="3" width="20" height="14" rx="2"/><line x1="8" y1="21" x2="16" y2="21"/><line x1="12" y1="17" x2="12" y2="21"/></svg>
+                        Системные ресурсы
+                    </div>
+                    <div style="display:flex;gap:var(--space-2);align-items:center">
+                        <span id="sysHealthChecked" style="font-size:0.72rem;color:var(--color-text-muted)"></span>
+                        <button class="btn btn-primary btn-sm" onclick="Diag.checkSystemHealth()">
+                            <svg width="13" height="13" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2.5"><polyline points="23 4 23 10 17 10"/><path d="M20.49 15a9 9 0 1 1-.02-8.49"/></svg>
+                            Проверить
+                        </button>
+                    </div>
+                </div>
+                <div id="sysHealthContainer">
+                    <div style="padding:var(--space-6);text-align:center;color:var(--color-text-muted);font-size:var(--text-sm)">
+                        Нажмите «Проверить» — SSH df/free/uptime на всех нодах параллельно
                     </div>
                 </div>
             </div>
@@ -2504,6 +2540,8 @@
                         _lastUpdateStr = clusterData.timestamp.toLocaleTimeString('ru-RU');
                         _tickCount++;
                         renderAll();
+                        SstMonitor.check();
+
 
                     } else if (msg.type === 'event') {
                         // Серверное событие — добавляем в лог
@@ -3296,6 +3334,41 @@
             _updateRejoinSelect(clusterData.nodes);
         }
 
+
+        function _renderWsrepRecoverResults(res) {
+            var container = document.getElementById('wsrepRecoverResultsTable');
+            if (!container) return;
+            if (!res || !res.results || !res.results.length) {
+                container.innerHTML = '';
+                return;
+            }
+            var rows = res.results.map(function(r) {
+                var isCandidate = r.node_id === res.candidate;
+                var rowStyle = isCandidate
+                    ? 'background:color-mix(in oklch,var(--color-success) 8%,var(--color-surface))'
+                    : '';
+                var seqnoColor = r.ok
+                    ? (isCandidate ? 'var(--color-success)' : 'var(--color-text)')
+                    : 'var(--color-error)';
+                return '<tr style="' + rowStyle + '">'
+                    + '<td style="padding:6px 12px;font-weight:600">' + (r.name || r.node_id) + (isCandidate ? ' <span style="font-size:0.7rem;color:var(--color-success);font-weight:700">★ кандидат</span>' : '') + '</td>'
+                    + '<td style="padding:6px 12px;color:var(--color-text-muted);font-size:0.8rem">' + (r.host || '') + '</td>'
+                    + '<td style="padding:6px 12px;font-family:monospace;color:' + seqnoColor + '">' + (r.ok ? r.seqno : '<span title="' + (r.message||'') + '">ERR</span>') + '</td>'
+                    + '<td style="padding:6px 12px;font-family:monospace;font-size:0.75rem;color:var(--color-text-muted)">' + (r.uuid && r.uuid !== 'unknown' ? r.uuid.substring(0,8) + '…' : '—') + '</td>'
+                    + '</tr>';
+            }).join('');
+            container.innerHTML = '<div style="margin-top:var(--space-4)">'
+                + '<div style="font-size:var(--text-xs);color:var(--color-text-muted);font-weight:600;margin-bottom:var(--space-2)">Результаты wsrep-recover-all</div>'
+                + '<div style="overflow-x:auto"><table style="width:100%">'
+                + '<thead><tr>'
+                + '<th style="padding:6px 12px;font-size:0.75rem;color:var(--color-text-muted);text-align:left;border-bottom:1px solid var(--color-border)">Нода</th>'
+                + '<th style="padding:6px 12px;font-size:0.75rem;color:var(--color-text-muted);text-align:left;border-bottom:1px solid var(--color-border)">Host</th>'
+                + '<th style="padding:6px 12px;font-size:0.75rem;color:var(--color-text-muted);text-align:left;border-bottom:1px solid var(--color-border)">seqno</th>'
+                + '<th style="padding:6px 12px;font-size:0.75rem;color:var(--color-text-muted);text-align:left;border-bottom:1px solid var(--color-border)">UUID (prefix)</th>'
+                + '</tr></thead>'
+                + '<tbody>' + rows + '</tbody></table></div></div>';
+        }
+
         function _updateRejoinSelect(nodes) {
             // Заполняем SST recipient/donor selects
             ['sstRecipientSelect','sstDonorSelect'].forEach(function(id) {
@@ -3667,6 +3740,91 @@
         }
 
         // ---- PUBLIC API ----
+
+        // ── SST MONITOR — auto-polling when Joiner nodes detected ──────
+        var SstMonitor = (function() {
+            var _timer = null;
+            var _INTERVAL = 3000;
+
+            function _isJoining(state) {
+                return state === 'Joining' || state === 'Joined' || state === 'Donor/Desynced';
+            }
+
+            function _startIfNeeded() {
+                var joiningNodes = (clusterData.nodes || []).filter(function(n){ return _isJoining(n.state); });
+                if (joiningNodes.length > 0 && !_timer) {
+                    _timer = setInterval(_poll, _INTERVAL);
+                    _showCard(true);
+                    addLog("INFO", "SST Monitor: авто-запуск для " + joiningNodes.map(function(n){return n.name||n.id;}).join(", "));
+                } else if (joiningNodes.length === 0 && _timer) {
+                    _stop();
+                }
+            }
+
+            function _stop() {
+                if (_timer) { clearInterval(_timer); _timer = null; }
+                setTimeout(function() { _showCard(false); }, 5000);
+            }
+
+            function _showCard(show) {
+                var card = document.getElementById('sstMonitorCard');
+                if (card) card.style.display = show ? '' : 'none';
+            }
+
+            function _poll() {
+                var joiningNodes = (clusterData.nodes || []).filter(function(n){ return _isJoining(n.state); });
+                if (!joiningNodes.length) { _stop(); return; }
+
+                var apiBase = getApiBase();
+                var promises = joiningNodes.map(function(node) {
+                    return fetch(apiBase + '/api/node/' + node.id + '/sst-status')
+                        .then(function(r) { return r.json(); })
+                        .catch(function() { return null; });
+                });
+
+                Promise.all(promises).then(function(results) {
+                    _render(joiningNodes, results);
+                    var allSynced = results.every(function(r){ return !r || r.state === 'Synced' || r.state === 'unknown'; });
+                    if (allSynced) _stop();
+                });
+            }
+
+            function _render(nodes, results) {
+                var body = document.getElementById('sstMonitorBody');
+                if (!body) return;
+                body.innerHTML = nodes.map(function(node, i) {
+                    var r = results[i];
+                    if (!r) return '<div style="padding:var(--space-2);color:var(--color-error)">' + (node.name||node.id) + ': ошибка запроса</div>';
+                    var pct = r.progress_pct || 0;
+                    var state = r.state || 'unknown';
+                    var method = r.sst_method || '?';
+                    var donor = r.donor || '';
+                    var stateColor = state === 'Synced' ? 'var(--color-success)' : state === 'Joining' ? 'var(--color-warning)' : 'var(--color-text-muted)';
+                    var barColor = state === 'Synced' ? 'var(--color-success)' : 'var(--color-primary)';
+                    return '<div style="margin-bottom:var(--space-4)">'
+                        + '<div style="display:flex;justify-content:space-between;align-items:center;margin-bottom:6px">'
+                        + '<span style="font-weight:600">' + (node.name||node.id) + '</span>'
+                        + '<span style="font-size:var(--text-xs);color:' + stateColor + ';font-weight:700">' + state + '</span>'
+                        + '</div>'
+                        + '<div style="font-size:var(--text-xs);color:var(--color-text-muted);margin-bottom:6px">'
+                        + 'Метод: ' + method + (donor ? ' · Донор: ' + donor : '')
+                        + ' · recv_queue: ' + (r.recv_queue || 0)
+                        + '</div>'
+                        + '<div style="height:8px;background:var(--color-surface-offset-2);border-radius:9999px;overflow:hidden">'
+                        + '<div style="height:100%;width:' + pct + '%;background:' + barColor + ';border-radius:9999px;transition:width 0.6s ease"></div>'
+                        + '</div>'
+                        + '<div style="font-size:var(--text-xs);color:var(--color-text-muted);margin-top:4px;text-align:right">' + pct + '%</div>'
+                        + '</div>';
+                }).join('');
+            }
+
+            return {
+                check: _startIfNeeded,
+                stop: _stop,
+                isActive: function() { return !!_timer; },
+            };
+        })();
+
         window.App = {
             go: function(page) {
                 document.querySelectorAll('.page').forEach(function(p) { p.classList.remove('active'); });
@@ -3941,29 +4099,50 @@
                     "Используется когда grastate.dat показывает seqno: -1 (dirty shutdown).",
                     "btn-warning").then(function(ok) {
                     if (!ok) return;
+                    var apiBase = getApiBase();
                     var nodes = clusterData.nodes || [];
                     if (!nodes.length) { toast("warning", "Нет нод"); return; }
-                    toast("info", "wsrep-recover запущен на " + nodes.length + " нодах...");
-                    addLog("WARN", "wsrep-recover запущен на всех нодах");
-                    var apiBase = getApiBase();
-                    var promises = nodes.map(function(node) {
-                        return fetch(apiBase + "/api/node/" + node.id + "/wsrep-recover", { method: "POST" })
-                            .then(function(r) { return r.json(); })
-                            .then(function(res) {
-                                node.seqno_fresh = res.seqno;
-                                node.wsrep_uuid = res.uuid;
-                                addLog(res.ok ? "INFO" : "ERROR",
-                                    node.name + ": wsrep-recover seqno=" + res.seqno + " uuid=" + (res.uuid || "?"));
-                                return res;
-                            })
-                            .catch(function(e) {
-                                addLog("ERROR", node.name + ": wsrep-recover failed: " + e.message);
+
+                    // Show inline loading state
+                    var el = document.getElementById('bootstrapCandidates');
+                    if (el) el.innerHTML = '<div style="padding:var(--space-4);text-align:center;color:var(--color-text-muted)">' +
+                        '<svg width="18" height="18" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" style="animation:spin 1s linear infinite;vertical-align:middle">' +
+                        '<polyline points="23 4 23 10 17 10"/><path d="M20.49 15a9 9 0 1 1-.02-8.49"/></svg>' +
+                        ' wsrep-recover выполняется на ' + nodes.length + ' нодах...</div>';
+
+                    toast("info", "wsrep-recover-all запущен...");
+                    addLog("WARN", "wsrep-recover-all: запуск на " + nodes.length + " нодах параллельно");
+
+                    fetch(apiBase + "/api/wsrep-recover-all", { method: "POST" })
+                        .then(function(r) { return r.json(); })
+                        .then(function(res) {
+                            if (!res.ok && !res.results) throw new Error(res.detail || "unknown error");
+
+                            // Merge seqno results back into clusterData.nodes
+                            (res.results || []).forEach(function(r) {
+                                var nd = clusterData.nodes.find(function(n){ return n.id === r.node_id; });
+                                if (nd) { nd.seqno_fresh = r.seqno; nd.wsrep_uuid = r.uuid; }
+                                addLog(r.ok ? "INFO" : "ERROR",
+                                    (r.name || r.node_id) + ": wsrep-recover seqno=" + r.seqno +
+                                    (r.ok ? "" : " ERR: " + (r.message || "?")));
                             });
-                    });
-                    Promise.all(promises).then(function() {
-                        renderBootstrapCandidates();
-                        toast("success", "wsrep-recover завершён. Обновите список кандидатов.");
-                    });
+
+                            // Show summary table below bootstrap candidates
+                            renderBootstrapCandidates();
+                            _renderWsrepRecoverResults(res);
+
+                            if (res.candidate) {
+                                toast("success", "wsrep-recover завершён. Кандидат: " + res.candidate + " seqno=" + res.candidate_seqno);
+                                addLog("INFO", "wsrep-recover-all: кандидат=" + res.candidate + " seqno=" + res.candidate_seqno);
+                            } else {
+                                toast("warning", "wsrep-recover завершён, но ни одна нода не вернула валидный seqno");
+                            }
+                        })
+                        .catch(function(e) {
+                            toast("error", "wsrep-recover-all ошибка: " + e.message);
+                            addLog("ERROR", "wsrep-recover-all failed: " + e.message);
+                            renderBootstrapCandidates();
+                        });
                 });
             },
 
@@ -5187,6 +5366,93 @@
         },
 
 
+
+
+        checkSystemHealth: function() {
+            var apiBase = getApiBase();
+            var container = document.getElementById('sysHealthContainer');
+            var checked   = document.getElementById('sysHealthChecked');
+            if (container) container.innerHTML = '<div style="padding:var(--space-6);text-align:center;color:var(--color-text-muted)">' +
+                '<svg width="18" height="18" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" style="animation:spin 1s linear infinite;vertical-align:middle"><polyline points="23 4 23 10 17 10"/><path d="M20.49 15a9 9 0 1 1-.02-8.49"/></svg>' +
+                ' Проверка системных ресурсов...</div>';
+
+            fetch(apiBase + '/api/diagnostics/system-health')
+                .then(function(r) { return r.json(); })
+                .then(function(data) {
+                    if (checked) checked.textContent = 'проверено в ' + (data.checked_at || '');
+
+                    if (!data.results || !data.results.length) {
+                        if (container) container.innerHTML = '<div style="padding:var(--space-4);color:var(--color-text-muted)">Нет нод</div>';
+                        return;
+                    }
+
+                    function _bar(pct, warn, crit) {
+                        var color = pct >= crit ? 'var(--color-error)' : pct >= warn ? 'var(--color-warning)' : 'var(--color-success)';
+                        return '<div style="display:flex;align-items:center;gap:8px">'
+                            + '<div style="flex:1;height:6px;background:var(--color-surface-offset-2);border-radius:9999px;overflow:hidden">'
+                            + '<div style="height:100%;width:' + Math.min(pct,100) + '%;background:' + color + ';border-radius:9999px"></div>'
+                            + '</div>'
+                            + '<span style="font-size:0.72rem;font-family:monospace;color:' + color + ';min-width:36px;text-align:right">' + pct + '%</span>'
+                            + '</div>';
+                    }
+
+                    var html = '<div style="overflow-x:auto"><table style="width:100%;border-collapse:collapse">'
+                        + '<thead><tr>'
+                        + '<th style="padding:8px 12px;font-size:0.75rem;color:var(--color-text-muted);text-align:left;border-bottom:1px solid var(--color-border)">Нода</th>'
+                        + '<th style="padding:8px 12px;font-size:0.75rem;color:var(--color-text-muted);text-align:left;border-bottom:1px solid var(--color-border)">Диск /var/lib/mysql</th>'
+                        + '<th style="padding:8px 12px;font-size:0.75rem;color:var(--color-text-muted);text-align:left;border-bottom:1px solid var(--color-border)">Диск /</th>'
+                        + '<th style="padding:8px 12px;font-size:0.75rem;color:var(--color-text-muted);text-align:left;border-bottom:1px solid var(--color-border)">Память</th>'
+                        + '<th style="padding:8px 12px;font-size:0.75rem;color:var(--color-text-muted);text-align:left;border-bottom:1px solid var(--color-border)">Load avg</th>'
+                        + '<th style="padding:8px 12px;font-size:0.75rem;color:var(--color-text-muted);text-align:left;border-bottom:1px solid var(--color-border)">Uptime</th>'
+                        + '</tr></thead><tbody>';
+
+                    data.results.forEach(function(r) {
+                        var rowBg = r.crit
+                            ? 'background:color-mix(in oklch,var(--color-error) 6%,var(--color-surface))'
+                            : r.warn
+                                ? 'background:color-mix(in oklch,var(--color-warning) 6%,var(--color-surface))'
+                                : '';
+                        var statusDot = r.crit ? '🔴' : r.warn ? '🟡' : r.ok ? '🟢' : '⚫';
+                        var dd = r.disk_data || {};
+                        var dr = r.disk_root || {};
+                        var mem = r.memory || {};
+                        var la  = r.load_avg || {};
+
+                        function diskCell(d) {
+                            if (!d || !d.total) return '<td style="padding:8px 12px;color:var(--color-text-muted)">—</td>';
+                            return '<td style="padding:8px 12px;min-width:160px">'
+                                + _bar(d.used_pct || 0, 80, 90)
+                                + '<div style="font-size:0.72rem;color:var(--color-text-muted);margin-top:3px">'
+                                + (d.used||'?') + ' / ' + (d.total||'?') + ' · свободно ' + (d.avail||'?')
+                                + '</div></td>';
+                        }
+
+                        html += '<tr style="' + rowBg + ';border-bottom:1px solid var(--color-divider)">'
+                            + '<td style="padding:8px 12px;font-weight:600">' + statusDot + ' ' + (r.name||r.node_id)
+                            + '<div style="font-size:0.72rem;color:var(--color-text-muted)">' + (r.host||'') + '</div>'
+                            + (r.error ? '<div style="font-size:0.72rem;color:var(--color-error)">' + r.error + '</div>' : '')
+                            + '</td>'
+                            + diskCell(dd)
+                            + diskCell(dr)
+                            + '<td style="padding:8px 12px;min-width:160px">'
+                            + (mem.total ? _bar(mem.used_pct || 0, 85, 95)
+                                + '<div style="font-size:0.72rem;color:var(--color-text-muted);margin-top:3px">' + (mem.used||'?') + ' / ' + (mem.total||'?') + '</div>'
+                                : '—')
+                            + '</td>'
+                            + '<td style="padding:8px 12px;font-family:monospace;font-size:0.8rem">'
+                            + (la["1m"] !== undefined ? la["1m"] + ' / ' + la["5m"] + ' / ' + la["15m"] : '—')
+                            + '</td>'
+                            + '<td style="padding:8px 12px;font-size:0.8rem;color:var(--color-text-muted)">' + (r.uptime||'—') + '</td>'
+                            + '</tr>';
+                    });
+
+                    html += '</tbody></table></div>';
+                    if (container) container.innerHTML = html;
+                })
+                .catch(function(e) {
+                    if (container) container.innerHTML = '<div style="padding:var(--space-4);color:var(--color-error)">Ошибка: ' + e.message + '</div>';
+                });
+        },
 
         // Обновляем селекторы нод и арбитраторов при открытии страницы
         init: function() {

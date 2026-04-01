@@ -1666,6 +1666,7 @@
                     <a href="#doc-modes" class="btn btn-ghost btn-sm">⚙ Режимы</a>
                     <a href="#doc-settings" class="btn btn-ghost btn-sm">🗂 Настройки</a>
                     <a href="#doc-ws" class="btn btn-ghost btn-sm">🔌 WebSocket</a>
+                    <a href="#doc-changelog" class="btn btn-ghost btn-sm">📋 Changelog</a>
                 </div>
             </div>
 
@@ -1769,12 +1770,12 @@
 
                     <div class="doc-card">
                         <div class="doc-card-header">
-                            <div class="doc-btn-label">Bootstrap</div>
+                            <div class="doc-btn-label">Bootstrap Wizard</div>
                             <span class="doc-category-badge cat-danger">Danger</span>
                         </div>
-                        <div class="doc-desc">Запустить кластер с нуля из одной выбранной ноды (<code>galera_new_cluster</code>). Применяется <strong>только при полном отказе всего кластера</strong> когда все ноды не в кластере. Перед запуском система показывает <code>seqno</code> из <code>grastate.dat</code> для каждой ноды — bootstrap запускать на ноде с наибольшим seqno.</div>
-                        <div class="doc-cmd">galera_new_cluster  # или: mysqld_safe --wsrep-new-cluster</div>
-                        <div class="doc-note">⚠ Запускать строго на одной ноде с наибольшим seqno. Запуск на устаревшей ноде → потеря транзакций.</div>
+                        <div class="doc-desc">Пошаговый мастер восстановления кластера после <strong>полного отказа всех нод</strong>. 6 шагов с авто-переходами: <strong>1)</strong> Pre-flight (MariaDB остановлена везде) → <strong>2)</strong> wsrep-recover на всех нодах параллельно → авто-кандидат по максимальному seqno → <strong>3)</strong> safe_to_bootstrap=1 → <strong>4)</strong> galera_new_cluster → <strong>5–N)</strong> последовательный запуск остальных нод с ожиданием Synced. Показывает таблицу seqno с подтверждением кандидата перед запуском.</div>
+                        <div class="doc-cmd">POST /api/bootstrap/wizard  {step: "check"|"recover"|"grastate"|"bootstrap"|"join"|"await_synced"}</div>
+                        <div class="doc-note">⚠ Все ноды должны быть остановлены перед запуском Wizard. Кандидат выбирается автоматически — можно подтвердить или прервать.</div>
                     </div>
 
                     <div class="doc-card">
@@ -1789,12 +1790,12 @@
 
                     <div class="doc-card">
                         <div class="doc-card-header">
-                            <div class="doc-btn-label">wsrep_recover (seqno=-1)</div>
+                            <div class="doc-btn-label">wsrep-recover-all (батч)</div>
                             <span class="doc-category-badge cat-danger">Danger</span>
                         </div>
-                        <div class="doc-desc">Вычислить реальный <code>seqno</code> ноды когда в <code>grastate.dat</code> стоит <code>seqno: -1</code> (бывает после аварийного отключения питания). Запускает MariaDB в спецрежиме — нода <strong>НЕ подключается к кластеру</strong>, только вычисляет позицию в лог. Результат выводится в поле «Последний seqno».</div>
-                        <div class="doc-cmd">mysqld_safe --wsrep-recover 2>&amp;1 | grep "Recovered position"</div>
-                        <div class="doc-note">После wsrep_recover вручную обновите grastate.dat с найденным seqno, затем выберите кандидата для Bootstrap.</div>
+                        <div class="doc-desc">Запуск <code>mysqld --wsrep-recover</code> <strong>параллельно на всех нодах</strong> через SSH+ThreadPoolExecutor. Возвращает таблицу нода→seqno и автоматически определяет кандидата с наибольшим seqno. Используется как шаг 2 в Bootstrap Wizard и как отдельная кнопка в Recovery. MariaDB должна быть <strong>остановлена</strong> на всех нодах перед запуском.</div>
+                        <div class="doc-cmd">POST /api/wsrep-recover-all  →  {results:[{node_id, seqno}], candidate, candidate_seqno}</div>
+                        <div class="doc-note">Bootstrap Wizard автоматически использует кандидата. При ручном запуске — нода с наибольшим seqno выбирается для Bootstrap.</div>
                     </div>
 
                     <div class="doc-card">
@@ -1837,11 +1838,21 @@
 
                     <div class="doc-card">
                         <div class="doc-card-header">
-                            <div class="doc-btn-label">Прогресс SST</div>
+                            <div class="doc-btn-label">Systemd Pre-check перед Bootstrap</div>
+                            <span class="doc-category-badge cat-warning">Warning</span>
+                        </div>
+                        <div class="doc-desc">Перед запуском <code>galera_new_cluster</code> бекенд автоматически проверяет через SSH: <code>systemctl is-active mariadb.service</code> на всех не-кандидатных нодах. Если MariaDB активна хотя бы на одной — Bootstrap <strong>блокируется</strong> с явным сообщением и списком нод, которые нужно остановить. Предотвращает split-brain при случайном Bootstrap на работающем кластере.</div>
+                        <div class="doc-cmd">systemctl is-active mariadb.service  # на каждой не-кандидатной ноде</div>
+                        <div class="doc-note">Проверка выполняется автоматически как шаг 1 Bootstrap Wizard и в endpoint POST /api/bootstrap. Отключить нельзя.</div>
+                    </div>
+
+                    <div class="doc-card">
+                        <div class="doc-card-header">
+                            <div class="doc-btn-label">SST Progress Monitor (realtime)</div>
                             <span class="doc-category-badge cat-info">Info</span>
                         </div>
-                        <div class="doc-desc">Индикатор прогресса на карточке ноды во время SST-передачи. Нода в состоянии <strong>Joiner</strong> показывает progress bar с процентом и методом (rsync / mariabackup). Данные получаются через SSH — парсинг <code>ps aux</code> или файла <code>/var/lib/mysql/sst_in_progress</code>.</div>
-                        <div class="doc-note">SST прогресс обновляется независимым polling-циклом каждые 5 сек пока нода в статусе Joiner.</div>
+                        <div class="doc-desc">Модуль <code>SstMonitor</code> — автоматически активируется когда нода переходит в состояние <strong>Joiner / Joining / Donor/Desynced</strong>. Показывает progress bar для каждой такой ноды: процент передачи, метод SST (rsync / mariabackup), нода-донор, recv_queue. Polling каждые <strong>3 сек</strong> через <code>GET /api/node/{id}/sst-status</code>. Автоматически скрывается после синхронизации.</div>
+                        <div class="doc-note">SstMonitor запускается и останавливается автоматически — вмешательства пользователя не требуется.</div>
                     </div>
 
                 </div>
@@ -1983,7 +1994,7 @@
                             <div class="doc-btn-label">wsrep — сводная таблица</div>
                             <span class="doc-category-badge cat-info">Info</span>
                         </div>
-                        <div class="doc-desc">10 ключевых wsrep-переменных по всем нодам в виде матрицы «параметр × нода». Цветовая кодировка: зелёный = норма, жёлтый = внимание, красный = проблема. Параметры: cluster_status, cluster_size, connected, ready, state, last_committed, recv_queue, flow_control_paused, cert_failures, bf_aborts. Автообновление с циклом мониторинга.</div>
+                        <div class="doc-desc">Ключевые wsrep-переменные по всем нодам в виде матрицы «параметр × нода». Цветовая кодировка: зелёный = норма, жёлтый = внимание, красный = проблема. Параметры: cluster_status, cluster_size, connected, ready, state, last_committed, recv_queue, flow_control_paused, cert_failures, bf_aborts, <strong>wsrep_incoming_addresses</strong> (адреса нод), <strong>wsrep_gcomm_uuid</strong> (UUID группы), <strong>wsrep_protocol_version</strong> (версия протокола). Автообновление с циклом мониторинга.</div>
                         <div class="doc-cmd">SHOW GLOBAL STATUS LIKE 'wsrep_%';</div>
                     </div>
 
@@ -2021,6 +2032,26 @@
                         </div>
                         <div class="doc-desc">Комплексная проверка конкретной ноды: SSH ping (latency) + попытка подключения к MariaDB с реальными кредами из <code>nodes.yaml</code>. Результат показывает: SSH OK/FAIL + latency, DB OK/FAIL + сообщение об ошибке, текущее <code>wsrep_local_state_comment</code>. Доступно из кнопки «Test Connection» на карточке ноды.</div>
                         <div class="doc-cmd">GET /api/node/{id}/test-connection</div>
+                    </div>
+
+                    <div class="doc-card">
+                        <div class="doc-card-header">
+                            <div class="doc-btn-label">InnoDB Status — диагностика дедлоков</div>
+                            <span class="doc-category-badge cat-info">Info</span>
+                        </div>
+                        <div class="doc-desc">Выполняет <code>SHOW ENGINE INNODB STATUS</code> на выбранной ноде через прямое SQL-подключение. Результат отображается в форматированном блоке с подсветкой секций: <strong>TRANSACTIONS</strong> (дедлоки), <strong>LATEST DETECTED DEADLOCK</strong>, <strong>SEMAPHORES</strong> (ожидания блокировок), <strong>FILE I/O</strong>. Незаменимо при расследовании проблем с производительностью. Доступно в «Диагностика» → InnoDB Status.</div>
+                        <div class="doc-cmd">SHOW ENGINE INNODB STATUS  →  GET /api/node/{id}/innodb-status</div>
+                        <div class="doc-note">Требует прямого SQL-подключения (db_user/db_password в nodes.yaml).</div>
+                    </div>
+
+                    <div class="doc-card">
+                        <div class="doc-card-header">
+                            <div class="doc-btn-label">Disk / System Health</div>
+                            <span class="doc-category-badge cat-info">Info</span>
+                        </div>
+                        <div class="doc-desc">Параллельная проверка системных ресурсов на <strong>всех нодах</strong> через SSH: дисковое пространство (<code>df -h</code>), оперативная память (<code>free -h</code>), uptime и load average. Результат — таблица с цветовой индикацией: диск >85% = красный, 70–85% = жёлтый, &lt;70% = зелёный. Доступно в «Диагностика» → Системные ресурсы.</div>
+                        <div class="doc-cmd">POST /api/diagnostics/system-health  →  параллельный SSH df/free/uptime</div>
+                        <div class="doc-note">Работает при остановленной MariaDB. Полезно перед плановым обслуживанием и при диагностике нехватки места.</div>
                     </div>
 
                 </div>
@@ -2164,6 +2195,26 @@
                         <div class="doc-cmd">GET /api/log/download</div>
                     </div>
 
+                    <div class="doc-card">
+                        <div class="doc-card-header">
+                            <div class="doc-btn-label">Редактирование арбитра</div>
+                            <span class="doc-category-badge cat-action">Action</span>
+                        </div>
+                        <div class="doc-desc">В разделе «Арбитры (garbd)» на странице Настройки кнопка <strong>Изменить</strong> открывает модальное окно с полями: ID, IP/Hostname, SSH Port, SSH User, SSH Key, DC. Изменения сохраняются через <code>PUT /api/config/arbitrator/{arb_id}</code> и отражаются в предпросмотре nodes.yaml немедленно.</div>
+                        <div class="doc-cmd">PUT /api/config/arbitrator/{arb_id}  {host, ssh_port, ssh_user, ssh_key, dc, id}</div>
+                        <div class="doc-note">Изменение ID арбитра обновляет запись на месте без пересоздания. Персистируется в nodes.yaml немедленно.</div>
+                    </div>
+
+                    <div class="doc-card">
+                        <div class="doc-card-header">
+                            <div class="doc-btn-label">Валидация конфигурации (Pydantic)</div>
+                            <span class="doc-category-badge cat-info">Info</span>
+                        </div>
+                        <div class="doc-desc">При загрузке <code>nodes.yaml</code> бекенд валидирует его через Pydantic-схему (<code>ConfigSchema</code>). Проверяются: обязательные поля (<code>id</code>, <code>host</code>), диапазоны портов (1–65535), типы данных. При ошибке — понятное сообщение: какое поле, какой узел, что неверно. Некорректный YAML возвращает 422 вместо 500.</div>
+                        <div class="doc-cmd">ConfigSchema(BaseModel)  →  NodeSchema, SettingsSchema, ArbitratorSchema</div>
+                        <div class="doc-note">Валидация выполняется автоматически при каждом вызове load_config(). Ошибки логируются и возвращаются клиенту.</div>
+                    </div>
+
                 </div>
             </div>
 
@@ -2220,8 +2271,113 @@
                         <div class="doc-note">Для работы через nginx добавьте: <code>proxy_read_timeout 86400; proxy_send_timeout 86400;</code></div>
                     </div>
 
+                    <div class="doc-card">
+                        <div class="doc-card-header">
+                            <div class="doc-btn-label">Rate Limiting — защита SSH-команд</div>
+                            <span class="doc-category-badge cat-warning">Warning</span>
+                        </div>
+                        <div class="doc-desc">Эндпоинт <code>POST /api/node/{node_id}/action</code> защищён in-memory rate limiter: максимум <strong>10 SSH-команд за 60 секунд</strong> на одну ноду (per node_id). При превышении возвращается <code>HTTP 429 Too Many Requests</code>. Реализовано без внешних зависимостей — скользящее окно на <code>collections.defaultdict + time.monotonic()</code>.</div>
+                        <div class="doc-cmd">HTTP 429: "Rate limit exceeded for node 'gc01': max 10 SSH actions per 60s"</div>
+                        <div class="doc-note">Лимит per node_id. Счётчик сбрасывается через скользящее окно автоматически — не требует перезапуска бекенда.</div>
+                    </div>
+
+                    <div class="doc-card">
+                        <div class="doc-card-header">
+                            <div class="doc-btn-label">WebSocket Manager — Dependency Injection</div>
+                            <span class="doc-category-badge cat-info">Info</span>
+                        </div>
+                        <div class="doc-desc">WebSocket Manager хранится в <code>app.state.ws_manager</code> (FastAPI lifespan) вместо глобальной переменной. Все эндпоинты получают его через <code>request.app.state.ws_manager</code>. Корректный lifecycle через <code>async with lifespan</code>, устранены глобальные side effects. <code>asyncio.get_running_loop()</code> вместо устаревшего <code>get_event_loop()</code> для Python 3.10+.</div>
+                        <div class="doc-cmd">app.state.ws_manager = _WsManager()  # в lifespan startup</div>
+                        <div class="doc-note">Паттерн соответствует FastAPI best practices.</div>
+                    </div>
+
                 </div>
             </div>
+
+            <!-- ─────────────────────────────────────────────── -->
+            <!-- SECTION 8: CHANGELOG                            -->
+            <!-- ─────────────────────────────────────────────── -->
+            <div class="doc-section" id="doc-changelog">
+                <div class="doc-section-title">
+                    <svg width="22" height="22" viewBox="0 0 24 24" fill="none" stroke="var(--color-text-muted)" stroke-width="2"><path d="M14 2H6a2 2 0 0 0-2 2v16a2 2 0 0 0 2 2h12a2 2 0 0 0 2-2V8z"/><polyline points="14 2 14 8 20 8"/><line x1="16" y1="13" x2="8" y2="13"/><line x1="16" y1="17" x2="8" y2="17"/><polyline points="10 9 9 9 8 9"/></svg>
+                    Changelog — история изменений
+                </div>
+                <div style="display:flex;flex-direction:column;gap:var(--space-5)">
+
+                    <div style="border-left:3px solid var(--color-primary);padding-left:var(--space-5)">
+                        <div style="display:flex;align-items:center;gap:var(--space-3);margin-bottom:var(--space-3)">
+                            <span style="font-size:var(--text-sm);font-weight:700;color:var(--color-text)">Sprint 1 — Быстрые фиксы</span>
+                            <span style="font-size:var(--text-xs);color:var(--color-text-muted);background:var(--color-surface-offset);padding:2px 8px;border-radius:9999px">S-задачи · апрель 2026</span>
+                        </div>
+                        <div style="display:flex;flex-direction:column;gap:var(--space-2)">
+                            <div style="display:flex;gap:var(--space-2);align-items:flex-start">
+                                <span style="color:var(--color-success);font-size:var(--text-xs);font-weight:700;min-width:24px;padding-top:2px">✓</span>
+                                <div style="font-size:var(--text-sm)"><strong>#2 asyncio fix</strong> — <code>asyncio.get_event_loop()</code> → <code>asyncio.get_running_loop()</code>. Задачи через <code>loop.create_task()</code>. Python 3.10+.</div>
+                            </div>
+                            <div style="display:flex;gap:var(--space-2);align-items:flex-start">
+                                <span style="color:var(--color-success);font-size:var(--text-xs);font-weight:700;min-width:24px;padding-top:2px">✓</span>
+                                <div style="font-size:var(--text-sm)"><strong>#4 WSREP_VARS расширен</strong> — добавлены <code>wsrep_incoming_addresses</code>, <code>wsrep_gcomm_uuid</code>, <code>wsrep_protocol_version</code> в galera_client.py.</div>
+                            </div>
+                            <div style="display:flex;gap:var(--space-2);align-items:flex-start">
+                                <span style="color:var(--color-success);font-size:var(--text-xs);font-weight:700;min-width:24px;padding-top:2px">✓</span>
+                                <div style="font-size:var(--text-sm)"><strong>#11 Systemd pre-check</strong> — Bootstrap блокируется если MariaDB активна на не-кандидатных нодах. SSH <code>systemctl is-active</code>.</div>
+                            </div>
+                        </div>
+                    </div>
+
+                    <div style="border-left:3px solid var(--color-warning);padding-left:var(--space-5)">
+                        <div style="display:flex;align-items:center;gap:var(--space-3);margin-bottom:var(--space-3)">
+                            <span style="font-size:var(--text-sm);font-weight:700;color:var(--color-text)">Sprint 2 — Фиксы M-уровня</span>
+                            <span style="font-size:var(--text-xs);color:var(--color-text-muted);background:var(--color-surface-offset);padding:2px 8px;border-radius:9999px">M-задачи · запланировано</span>
+                        </div>
+                        <div style="display:flex;flex-direction:column;gap:var(--space-2)">
+                            <div style="display:flex;gap:var(--space-2);align-items:flex-start">
+                                <span style="color:var(--color-text-faint);font-size:var(--text-xs);font-weight:700;min-width:24px;padding-top:2px">○</span>
+                                <div style="font-size:var(--text-sm);color:var(--color-text-muted)"><strong>#3 SSH переиспользование</strong> — helper <code>_ssh(node, *cmds)</code>: одно соединение на вызов, все шаги bootstrap/rejoin через одну сессию.</div>
+                            </div>
+                            <div style="display:flex;gap:var(--space-2);align-items:flex-start">
+                                <span style="color:var(--color-text-faint);font-size:var(--text-xs);font-weight:700;min-width:24px;padding-top:2px">○</span>
+                                <div style="font-size:var(--text-sm);color:var(--color-text-muted)"><strong>#5 Pydantic config</strong> — <code>ConfigSchema(BaseModel)</code> в config.py. Понятные ошибки вместо 500 при неверном nodes.yaml.</div>
+                            </div>
+                            <div style="display:flex;gap:var(--space-2);align-items:flex-start">
+                                <span style="color:var(--color-text-faint);font-size:var(--text-xs);font-weight:700;min-width:24px;padding-top:2px">○</span>
+                                <div style="font-size:var(--text-sm);color:var(--color-text-muted)"><strong>#6 Rate limiting</strong> — <code>POST /api/node/{id}/action</code> max 10 SSH-команд за 60 сек per node_id. HTTP 429. In-memory, без зависимостей.</div>
+                            </div>
+                        </div>
+                    </div>
+
+                    <div style="border-left:3px solid var(--color-surface-dynamic);padding-left:var(--space-5)">
+                        <div style="display:flex;align-items:center;gap:var(--space-3);margin-bottom:var(--space-3)">
+                            <span style="font-size:var(--text-sm);font-weight:700;color:var(--color-text)">Sprint 3–4 — Новая функциональность</span>
+                            <span style="font-size:var(--text-xs);color:var(--color-text-muted);background:var(--color-surface-offset);padding:2px 8px;border-radius:9999px">M/L-задачи · запланировано</span>
+                        </div>
+                        <div style="display:flex;flex-direction:column;gap:var(--space-2)">
+                            <div style="display:flex;gap:var(--space-2);align-items:flex-start">
+                                <span style="color:var(--color-text-faint);font-size:var(--text-xs);font-weight:700;min-width:24px;padding-top:2px">○</span>
+                                <div style="font-size:var(--text-sm);color:var(--color-text-muted)"><strong>#7 WS Manager DI</strong> — <code>app.state.ws_manager</code> вместо globals(). FastAPI lifespan.</div>
+                            </div>
+                            <div style="display:flex;gap:var(--space-2);align-items:flex-start">
+                                <span style="color:var(--color-text-faint);font-size:var(--text-xs);font-weight:700;min-width:24px;padding-top:2px">○</span>
+                                <div style="font-size:var(--text-sm);color:var(--color-text-muted)"><strong>#8 SST Progress Monitor</strong> — модуль SstMonitor, polling 3 сек, авто-запуск при Joiner/Donor.</div>
+                            </div>
+                            <div style="display:flex;gap:var(--space-2);align-items:flex-start">
+                                <span style="color:var(--color-text-faint);font-size:var(--text-xs);font-weight:700;min-width:24px;padding-top:2px">○</span>
+                                <div style="font-size:var(--text-sm);color:var(--color-text-muted)"><strong>#9 wsrep-recover-all батч</strong> — <code>POST /api/wsrep-recover-all</code>, ThreadPoolExecutor, авто-кандидат.</div>
+                            </div>
+                            <div style="display:flex;gap:var(--space-2);align-items:flex-start">
+                                <span style="color:var(--color-text-faint);font-size:var(--text-xs);font-weight:700;min-width:24px;padding-top:2px">○</span>
+                                <div style="font-size:var(--text-sm);color:var(--color-text-muted)"><strong>#10 Bootstrap Wizard</strong> — BsWizard, 6 шагов с авто-переходами, таблица seqno, polling Synced.</div>
+                            </div>
+                            <div style="display:flex;gap:var(--space-2);align-items:flex-start">
+                                <span style="color:var(--color-text-faint);font-size:var(--text-xs);font-weight:700;min-width:24px;padding-top:2px">○</span>
+                                <div style="font-size:var(--text-sm);color:var(--color-text-muted)"><strong>#12 Disk / System Health</strong> — SSH df/free/uptime параллельно, цветовые пороги, секция в Диагностика.</div>
+                            </div>
+                        </div>
+                    </div>
+
+                </div>
+            </div>
+
         </section>
 
 

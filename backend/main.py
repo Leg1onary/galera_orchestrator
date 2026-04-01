@@ -1007,7 +1007,7 @@ async def api_version():
         except Exception as e:
             error = str(e)
         api_version._cache = {"ts": now, "remote_sha": remote_sha,
-                               "remote_short": remote_short, "error": error}
+                              "remote_short": remote_short, "error": error}
     else:
         remote_sha   = cache["remote_sha"]
         remote_short = cache["remote_short"]

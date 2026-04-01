@@ -1666,7 +1666,6 @@
                     <a href="#doc-modes" class="btn btn-ghost btn-sm">⚙ Режимы</a>
                     <a href="#doc-settings" class="btn btn-ghost btn-sm">🗂 Настройки</a>
                     <a href="#doc-ws" class="btn btn-ghost btn-sm">🔌 WebSocket</a>
-                    <a href="#doc-changelog" class="btn btn-ghost btn-sm">📋 Changelog</a>
                 </div>
             </div>
 
@@ -2293,91 +2292,6 @@
 
                 </div>
             </div>
-
-            <!-- ─────────────────────────────────────────────── -->
-            <!-- SECTION 8: CHANGELOG                            -->
-            <!-- ─────────────────────────────────────────────── -->
-            <div class="doc-section" id="doc-changelog">
-                <div class="doc-section-title">
-                    <svg width="22" height="22" viewBox="0 0 24 24" fill="none" stroke="var(--color-text-muted)" stroke-width="2"><path d="M14 2H6a2 2 0 0 0-2 2v16a2 2 0 0 0 2 2h12a2 2 0 0 0 2-2V8z"/><polyline points="14 2 14 8 20 8"/><line x1="16" y1="13" x2="8" y2="13"/><line x1="16" y1="17" x2="8" y2="17"/><polyline points="10 9 9 9 8 9"/></svg>
-                    Changelog — история изменений
-                </div>
-                <div style="display:flex;flex-direction:column;gap:var(--space-5)">
-
-                    <div style="border-left:3px solid var(--color-primary);padding-left:var(--space-5)">
-                        <div style="display:flex;align-items:center;gap:var(--space-3);margin-bottom:var(--space-3)">
-                            <span style="font-size:var(--text-sm);font-weight:700;color:var(--color-text)">Sprint 1 — Быстрые фиксы</span>
-                            <span style="font-size:var(--text-xs);color:var(--color-text-muted);background:var(--color-surface-offset);padding:2px 8px;border-radius:9999px">S-задачи · апрель 2026</span>
-                        </div>
-                        <div style="display:flex;flex-direction:column;gap:var(--space-2)">
-                            <div style="display:flex;gap:var(--space-2);align-items:flex-start">
-                                <span style="color:var(--color-success);font-size:var(--text-xs);font-weight:700;min-width:24px;padding-top:2px">✓</span>
-                                <div style="font-size:var(--text-sm)"><strong>#2 asyncio fix</strong> — <code>asyncio.get_event_loop()</code> → <code>asyncio.get_running_loop()</code>. Задачи через <code>loop.create_task()</code>. Python 3.10+.</div>
-                            </div>
-                            <div style="display:flex;gap:var(--space-2);align-items:flex-start">
-                                <span style="color:var(--color-success);font-size:var(--text-xs);font-weight:700;min-width:24px;padding-top:2px">✓</span>
-                                <div style="font-size:var(--text-sm)"><strong>#4 WSREP_VARS расширен</strong> — добавлены <code>wsrep_incoming_addresses</code>, <code>wsrep_gcomm_uuid</code>, <code>wsrep_protocol_version</code> в galera_client.py.</div>
-                            </div>
-                            <div style="display:flex;gap:var(--space-2);align-items:flex-start">
-                                <span style="color:var(--color-success);font-size:var(--text-xs);font-weight:700;min-width:24px;padding-top:2px">✓</span>
-                                <div style="font-size:var(--text-sm)"><strong>#11 Systemd pre-check</strong> — Bootstrap блокируется если MariaDB активна на не-кандидатных нодах. SSH <code>systemctl is-active</code>.</div>
-                            </div>
-                        </div>
-                    </div>
-
-                    <div style="border-left:3px solid var(--color-warning);padding-left:var(--space-5)">
-                        <div style="display:flex;align-items:center;gap:var(--space-3);margin-bottom:var(--space-3)">
-                            <span style="font-size:var(--text-sm);font-weight:700;color:var(--color-text)">Sprint 2 — Фиксы M-уровня</span>
-                            <span style="font-size:var(--text-xs);color:var(--color-text-muted);background:var(--color-surface-offset);padding:2px 8px;border-radius:9999px">M-задачи · запланировано</span>
-                        </div>
-                        <div style="display:flex;flex-direction:column;gap:var(--space-2)">
-                            <div style="display:flex;gap:var(--space-2);align-items:flex-start">
-                                <span style="color:var(--color-text-faint);font-size:var(--text-xs);font-weight:700;min-width:24px;padding-top:2px">○</span>
-                                <div style="font-size:var(--text-sm);color:var(--color-text-muted)"><strong>#3 SSH переиспользование</strong> — helper <code>_ssh(node, *cmds)</code>: одно соединение на вызов, все шаги bootstrap/rejoin через одну сессию.</div>
-                            </div>
-                            <div style="display:flex;gap:var(--space-2);align-items:flex-start">
-                                <span style="color:var(--color-text-faint);font-size:var(--text-xs);font-weight:700;min-width:24px;padding-top:2px">○</span>
-                                <div style="font-size:var(--text-sm);color:var(--color-text-muted)"><strong>#5 Pydantic config</strong> — <code>ConfigSchema(BaseModel)</code> в config.py. Понятные ошибки вместо 500 при неверном nodes.yaml.</div>
-                            </div>
-                            <div style="display:flex;gap:var(--space-2);align-items:flex-start">
-                                <span style="color:var(--color-text-faint);font-size:var(--text-xs);font-weight:700;min-width:24px;padding-top:2px">○</span>
-                                <div style="font-size:var(--text-sm);color:var(--color-text-muted)"><strong>#6 Rate limiting</strong> — <code>POST /api/node/{id}/action</code> max 10 SSH-команд за 60 сек per node_id. HTTP 429. In-memory, без зависимостей.</div>
-                            </div>
-                        </div>
-                    </div>
-
-                    <div style="border-left:3px solid var(--color-surface-dynamic);padding-left:var(--space-5)">
-                        <div style="display:flex;align-items:center;gap:var(--space-3);margin-bottom:var(--space-3)">
-                            <span style="font-size:var(--text-sm);font-weight:700;color:var(--color-text)">Sprint 3–4 — Новая функциональность</span>
-                            <span style="font-size:var(--text-xs);color:var(--color-text-muted);background:var(--color-surface-offset);padding:2px 8px;border-radius:9999px">M/L-задачи · запланировано</span>
-                        </div>
-                        <div style="display:flex;flex-direction:column;gap:var(--space-2)">
-                            <div style="display:flex;gap:var(--space-2);align-items:flex-start">
-                                <span style="color:var(--color-text-faint);font-size:var(--text-xs);font-weight:700;min-width:24px;padding-top:2px">○</span>
-                                <div style="font-size:var(--text-sm);color:var(--color-text-muted)"><strong>#7 WS Manager DI</strong> — <code>app.state.ws_manager</code> вместо globals(). FastAPI lifespan.</div>
-                            </div>
-                            <div style="display:flex;gap:var(--space-2);align-items:flex-start">
-                                <span style="color:var(--color-text-faint);font-size:var(--text-xs);font-weight:700;min-width:24px;padding-top:2px">○</span>
-                                <div style="font-size:var(--text-sm);color:var(--color-text-muted)"><strong>#8 SST Progress Monitor</strong> — модуль SstMonitor, polling 3 сек, авто-запуск при Joiner/Donor.</div>
-                            </div>
-                            <div style="display:flex;gap:var(--space-2);align-items:flex-start">
-                                <span style="color:var(--color-text-faint);font-size:var(--text-xs);font-weight:700;min-width:24px;padding-top:2px">○</span>
-                                <div style="font-size:var(--text-sm);color:var(--color-text-muted)"><strong>#9 wsrep-recover-all батч</strong> — <code>POST /api/wsrep-recover-all</code>, ThreadPoolExecutor, авто-кандидат.</div>
-                            </div>
-                            <div style="display:flex;gap:var(--space-2);align-items:flex-start">
-                                <span style="color:var(--color-text-faint);font-size:var(--text-xs);font-weight:700;min-width:24px;padding-top:2px">○</span>
-                                <div style="font-size:var(--text-sm);color:var(--color-text-muted)"><strong>#10 Bootstrap Wizard</strong> — BsWizard, 6 шагов с авто-переходами, таблица seqno, polling Synced.</div>
-                            </div>
-                            <div style="display:flex;gap:var(--space-2);align-items:flex-start">
-                                <span style="color:var(--color-text-faint);font-size:var(--text-xs);font-weight:700;min-width:24px;padding-top:2px">○</span>
-                                <div style="font-size:var(--text-sm);color:var(--color-text-muted)"><strong>#12 Disk / System Health</strong> — SSH df/free/uptime параллельно, цветовые пороги, секция в Диагностика.</div>
-                            </div>
-                        </div>
-                    </div>
-
-                </div>
-            </div>
-
         </section>
 
 

@@ -614,6 +614,10 @@
             box-shadow: 0 0 0 3px var(--primary-dim);
         }
         .form-input::placeholder { color: var(--text-faint); }
+        .form-input option {
+            background: var(--surface-2);
+            color: var(--text);
+        }
         .form-row { display: grid; grid-template-columns: 1fr 1fr; gap: var(--space-4); }
         .form-hint { font-size: var(--text-xs); color: var(--text-muted); margin-top: var(--space-1); }
         .form-section {
@@ -1026,6 +1030,85 @@
         .logo-galera-svg {
             flex-shrink: 0;
         }
+
+        /* ── UPDATE BANNER ─────────────────────────────────────── */
+        #updateBanner {
+            display: none;
+            align-items: center;
+            gap: var(--space-3);
+            background: var(--warning-dim);
+            border: 1px solid var(--warning);
+            border-radius: var(--radius-lg);
+            padding: var(--space-3) var(--space-5);
+            margin-bottom: var(--space-6);
+            font-size: var(--text-sm);
+            flex-wrap: nowrap;
+        }
+        #updateBanner.visible {
+            display: flex;
+        }
+        .update-banner-icon {
+            font-size: 1.2rem;
+            flex-shrink: 0;
+        }
+        .update-banner-text {
+            flex: 1;
+            min-width: 0;
+            line-height: 1.5;
+        }
+        .update-banner-close {
+            flex-shrink: 0;
+            background: none;
+            border: none;
+            cursor: pointer;
+            color: var(--text-muted);
+            font-size: 1rem;
+            padding: 2px 6px;
+            border-radius: var(--radius-sm);
+            transition: background var(--transition), color var(--transition);
+        }
+        .update-banner-close:hover {
+            background: var(--surface-3);
+            color: var(--text);
+        }
+
+        /* ── VERSION BADGE ──────────────────────────────────────── */
+        .header-version-badge {
+            display: flex;
+            align-items: center;
+            gap: 5px;
+            padding: 5px 10px;
+            border-radius: var(--radius-full);
+            border: 1px solid var(--border-strong);
+            background: var(--surface-2);
+            color: var(--text-muted);
+            font-size: 0.72rem;
+            font-weight: 500;
+            white-space: nowrap;
+            cursor: default;
+            transition: background var(--transition), border-color var(--transition);
+        }
+        .header-version-badge.has-update {
+            border-color: rgba(245,158,11,0.5);
+            background: rgba(245,158,11,0.08);
+            color: #f59e0b;
+            cursor: pointer;
+        }
+        .version-dot {
+            width: 8px; height: 8px;
+            border-radius: 50%;
+            flex-shrink: 0;
+            background: var(--success);
+            box-shadow: 0 0 4px var(--success);
+        }
+        .version-dot.outdated {
+            background: var(--warning);
+            box-shadow: 0 0 4px var(--warning);
+        }
+        .version-dot.unknown {
+            background: var(--text-faint);
+            box-shadow: none;
+        }
     </style>
 </head>
 <body>
@@ -1053,7 +1136,7 @@
 
         <div class="header-spacer"></div>
 
-        <div style="display:flex;align-items:center;gap:var(--space-3);flex-wrap:wrap">
+        <div style="display:flex;align-items:center;gap:var(--space-3);flex-wrap:wrap;min-width:0;overflow:hidden">
 
             <!-- ENV switcher: TEST / PROD -->
             <div style="display:flex;align-items:center;gap:3px;background:var(--surface-2);border:1px solid var(--border);border-radius:var(--radius-full);padding:3px">
@@ -1125,7 +1208,7 @@
 
         <!-- Star on GitHub -->
         <a class="header-star-btn" href="https://github.com/Leg1onary/galera_orchestrator" target="_blank" rel="noopener noreferrer" title="Star on GitHub" id="githubStarBtn">
-            ⭐ Star
+            ⭐
             <span class="star-count" id="githubStarCount"></span>
         </a>
 
@@ -1179,17 +1262,17 @@
 
     <!-- MAIN -->
     <main class="app-main" id="appMain">
-    <!-- Update notification banner (показывается если есть новая версия) -->
-    <div id="updateBanner">
-        <span class="update-banner-icon">🔔</span>
-        <div class="update-banner-text">
-            <strong>Доступно обновление!</strong>
-            Текущая версия: <code id="bannerLocalSha" style="font-family:var(--font-mono)"></code> →
-            Последняя: <code id="bannerRemoteSha" style="font-family:var(--font-mono)"></code>.
-            Запусти <code style="font-family:var(--font-mono)">./update.sh</code> на сервере.
+        <!-- Update notification banner (показывается если есть новая версия) -->
+        <div id="updateBanner">
+            <span class="update-banner-icon">🔔</span>
+            <div class="update-banner-text">
+                <strong>Доступно обновление!</strong>
+                Текущая версия: <code id="bannerLocalSha" style="font-family:var(--font-mono)"></code> →
+                Последняя: <code id="bannerRemoteSha" style="font-family:var(--font-mono)"></code>.
+                Запусти <code style="font-family:var(--font-mono)">./update.sh</code> на сервере.
+            </div>
+            <button class="update-banner-close" onclick="document.getElementById('updateBanner').classList.remove('visible')" title="Закрыть">✕</button>
         </div>
-        <button class="update-banner-close" onclick="document.getElementById('updateBanner').classList.remove('visible')" title="Закрыть">✕</button>
-    </div>
 
         <!-- ====== PAGE: OVERVIEW ====== -->
         <section class="page active" id="page-overview">
@@ -5022,7 +5105,7 @@
                 var apiBase = getApiBase();
                 var payload = {};
                 if (dbUser) payload.db_user     = dbUser;
-                if (dbPass) payload.db_password = dbPass;
+                if (dbPass) payload.db_pass = dbPass;
                 payload.db_port = dbPort;
                 fetch(apiBase + '/api/config/db', {
                     method: 'POST',
@@ -5087,7 +5170,7 @@
                 fetch(apiBase + '/api/config/node', {
                     method: 'POST',
                     headers: { 'Content-Type': 'application/json' },
-                    body: JSON.stringify({ id: name, name: name, host: host, port: port, ssh_port: ssh, ssh_user: sshUser, ssh_key: sshKey })
+                    body: JSON.stringify({ id: name, label: name, host: host, db_port: port, ssh_port: ssh, ssh_user: sshUser, ssh_key: sshKey })
                 })
                     .then(function(r) { return r.json(); })
                     .then(function() {
@@ -5125,7 +5208,7 @@
                 document.getElementById('editNodeSshUser').value  = node.ssh_user || 'root';
                 document.getElementById('editNodeSshKey').value   = node.ssh_key || '~/.ssh/id_rsa';
                 document.getElementById('editNodeDbUser').value   = node.db_user || '';
-                document.getElementById('editNodeDbPass').value   = node.db_password || '';
+                document.getElementById('editNodeDbPass').value   = node.db_pass || '';
 
                 // Сбрасываем результат теста
                 var tr = document.getElementById('editTestResult');
@@ -5156,9 +5239,9 @@
                             method: 'POST',
                             headers: { 'Content-Type': 'application/json' },
                             body: JSON.stringify({
-                                id: name, name: name, host: host, port: port,
+                                id: name, label: name, host: host, db_port: port,
                                 ssh_port: ssh, ssh_user: sshUser, ssh_key: sshKey,
-                                db_user: dbUser || undefined, db_password: dbPass || undefined
+                                db_user: dbUser || undefined, db_pass: dbPass || undefined
                             })
                         })
                             .then(function(r) { return r.json(); })
@@ -5168,7 +5251,7 @@
                                 if (node) {
                                     node.id = name; node.name = name; node.host = host;
                                     node.port = port; node.ssh_port = ssh; node.ssh_user = sshUser;
-                                    node.db_user = dbUser; node.db_password = dbPass;
+                                    node.db_user = dbUser; node.db_pass = dbPass;
                                 }
                                 App.closeModal('editNodeModal');
                                 renderAll();
@@ -5202,9 +5285,9 @@
                     method: 'POST',
                     headers: { 'Content-Type': 'application/json' },
                     body: JSON.stringify({
-                        id: tmpId, name: name, host: host, port: port,
+                        id: tmpId, label: name, host: host, db_port: port,
                         ssh_port: ssh, ssh_user: sshUser, ssh_key: sshKey,
-                        db_user: dbUser || undefined, db_password: dbPass || undefined
+                        db_user: dbUser || undefined, db_pass: dbPass || undefined
                     })
                 })
                     .then(function() {
@@ -6699,7 +6782,7 @@
 
             text.textContent = local;
             badge.title = 'Коммит: ' + (data.local_sha || local) +
-                          (remote ? ' | GitHub: ' + (data.remote_sha || remote) : '');
+                (remote ? ' | GitHub: ' + (data.remote_sha || remote) : '');
 
             if (upToDate === true) {
                 dot.className = 'version-dot';          // зелёный

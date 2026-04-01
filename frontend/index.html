@@ -1109,6 +1109,12 @@
             </div>
         </div>
 
+
+        <!-- Version badge -->
+        <div class="header-version-badge" id="versionBadge" title="Версия (текущий коммит)">
+            <span class="version-dot unknown" id="versionDot"></span>
+            <span id="versionText">v…</span>
+        </div>
         <!-- GitHub link -->
         <a class="header-github-link" href="https://github.com/Leg1onary/galera_orchestrator" target="_blank" rel="noopener noreferrer" title="GitHub Repository">
             <svg width="15" height="15" viewBox="0 0 24 24" fill="currentColor">
@@ -1173,6 +1179,17 @@
 
     <!-- MAIN -->
     <main class="app-main" id="appMain">
+    <!-- Update notification banner (показывается если есть новая версия) -->
+    <div id="updateBanner">
+        <span class="update-banner-icon">🔔</span>
+        <div class="update-banner-text">
+            <strong>Доступно обновление!</strong>
+            Текущая версия: <code id="bannerLocalSha" style="font-family:var(--font-mono)"></code> →
+            Последняя: <code id="bannerRemoteSha" style="font-family:var(--font-mono)"></code>.
+            Запусти <code style="font-family:var(--font-mono)">./update.sh</code> на сервере.
+        </div>
+        <button class="update-banner-close" onclick="document.getElementById('updateBanner').classList.remove('visible')" title="Закрыть">✕</button>
+    </div>
 
         <!-- ====== PAGE: OVERVIEW ====== -->
         <section class="page active" id="page-overview">
@@ -6661,6 +6678,88 @@
                 }
             })
             .catch(function() {});
+    })();
+
+    // ── Version check (polls /api/version once per page load, cached 24h server-side) ──
+    (function() {
+        var CACHE_KEY = 'go_version_check';
+        var CACHE_TTL = 86400000; // 24h in ms
+
+        function applyVersionUI(data) {
+            var badge  = document.getElementById('versionBadge');
+            var dot    = document.getElementById('versionDot');
+            var text   = document.getElementById('versionText');
+            var banner = document.getElementById('updateBanner');
+
+            if (!badge || !dot || !text) return;
+
+            var local  = (data.local_short  || 'unknown');
+            var remote = (data.remote_short || null);
+            var upToDate = data.up_to_date;
+
+            text.textContent = local;
+            badge.title = 'Коммит: ' + (data.local_sha || local) +
+                          (remote ? ' | GitHub: ' + (data.remote_sha || remote) : '');
+
+            if (upToDate === true) {
+                dot.className = 'version-dot';          // зелёный
+                badge.classList.remove('has-update');
+                badge.title += ' ✓ Актуальная версия';
+            } else if (upToDate === false) {
+                dot.className = 'version-dot outdated'; // жёлтый
+                badge.classList.add('has-update');
+                badge.title += ' ⚠ Доступно обновление!';
+                // Клик по badge скроллит к/показывает banner
+                badge.onclick = function() {
+                    if (banner) banner.classList.add('visible');
+                };
+                // Показываем banner
+                if (banner) {
+                    var lEl = document.getElementById('bannerLocalSha');
+                    var rEl = document.getElementById('bannerRemoteSha');
+                    if (lEl) lEl.textContent = local;
+                    if (rEl) rEl.textContent = remote || '?';
+                    banner.classList.add('visible');
+                }
+            } else {
+                dot.className = 'version-dot unknown';  // серый
+                badge.classList.remove('has-update');
+            }
+        }
+
+        function fetchVersion() {
+            // Проверяем localStorage-кеш чтобы не флудить при каждом F5
+            try {
+                var cached = JSON.parse(localStorage.getItem(CACHE_KEY) || 'null');
+                if (cached && (Date.now() - cached.ts) < CACHE_TTL) {
+                    applyVersionUI(cached.data);
+                    return;
+                }
+            } catch(e) {}
+
+            var base = (typeof getApiBase === 'function') ? getApiBase() : '';
+            fetch(base + '/api/version')
+                .then(function(r) { return r.ok ? r.json() : null; })
+                .then(function(data) {
+                    if (!data) return;
+                    applyVersionUI(data);
+                    try {
+                        localStorage.setItem(CACHE_KEY, JSON.stringify({ ts: Date.now(), data: data }));
+                    } catch(e) {}
+                })
+                .catch(function() {
+                    // Нет связи с backend — показываем unknown
+                    var text = document.getElementById('versionText');
+                    if (text) text.textContent = 'offline';
+                });
+        }
+
+        // Запускаем после загрузки страницы
+        if (document.readyState === 'loading') {
+            document.addEventListener('DOMContentLoaded', fetchVersion);
+        } else {
+            setTimeout(fetchVersion, 800);
+        }
     })();
 
 </script>

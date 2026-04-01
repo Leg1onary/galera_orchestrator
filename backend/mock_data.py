@@ -3,13 +3,6 @@ import random, time, math
 _scenario = "normal"
 _start = time.time()
 
-# Per-node commit counters (simulate live activity)
-_commit_base = {"gc01": 485734, "gc02": 485730}
-# Seqno for bootstrap analysis (grastate.dat simulation)
-_seqno = {
-    "gc01": {"seqno": 485734, "safe_to_bootstrap": 1, "uuid": "5a7b1c2d-dead-beef-cafe-0123456789ab"},
-    "gc02": {"seqno": 485730, "safe_to_bootstrap": 0, "uuid": "5a7b1c2d-dead-beef-cafe-0123456789ab"},
-}
 # garbd mock state
 _garbd = {"online": True, "last_seen": time.time()}
 
@@ -23,9 +16,15 @@ def get_scenario() -> str:
     return _scenario
 
 
+def _node_base_seqno(node_id: str) -> int:
+    """Deterministic base seqno per node derived from its id."""
+    return 485730 + sum(ord(c) for c in node_id) % 20
+
+
 def node_status(node_id: str, node: dict) -> dict:
     elapsed = int(time.time() - _start)
-    commits = _commit_base.get(node_id, 100000) + elapsed * 3
+    base_seqno = _node_base_seqno(node_id)
+    commits = base_seqno + elapsed * 3
 
     base = {
         "id":   node_id,
@@ -46,9 +45,9 @@ def node_status(node_id: str, node: dict) -> dict:
         "wsrep_bf_aborts":           0,
         "wsrep_apply_oooe":          round(random.uniform(0, 0.05), 4),
         "wsrep_cluster_conf_id":     12,
-        "wsrep_cluster_state_uuid":  _seqno[node_id]["uuid"] if node_id in _seqno else "unknown",
-        "wsrep_incoming_addresses":  ",".join([node.get("host","10.0.0.10") + ":4567"] + ["10.0.0.1%d:4567" % x for x in range(1, 3)]),
-        "wsrep_gcomm_uuid":          _seqno[node_id]["uuid"] if node_id in _seqno else "5a7b1c2d-dead-beef-cafe-0123456789ab",
+        "wsrep_cluster_state_uuid":  "5a7b1c2d-dead-beef-cafe-0123456789ab",
+        "wsrep_incoming_addresses":  ",".join([node.get("host", "10.0.0.10") + ":4567"] + ["10.0.0.1%d:4567" % x for x in range(1, 3)]),
+        "wsrep_gcomm_uuid":          "5a7b1c2d-dead-beef-cafe-0123456789ab",
         "wsrep_protocol_version":    "9",
         "read_only":             False,
         "online": True,
@@ -79,13 +78,16 @@ def node_status(node_id: str, node: dict) -> dict:
     return base
 
 
-# ── seqno / grastate.dat (for bootstrap analysis) ────────────
+# ── seqno / grastate.dat (for bootstrap analysis) ────────────────────
 def mock_seqno(nodes_cfg: list) -> list:
     """Simulate reading /var/lib/mysql/grastate.dat from each node."""
     result = []
     for n in nodes_cfg:
         nid = n["id"]
-        s = _seqno.get(nid, {})
+        base_seqno = _node_base_seqno(nid)
+        elapsed = int(time.time() - _start)
+        seqno_val = base_seqno + elapsed * 3
+
         if _scenario in ("gc01_down",) and nid == "gc01":
             result.append({
                 "id": nid, "name": n.get("name", nid), "host": n.get("host", ""),
@@ -102,53 +104,49 @@ def mock_seqno(nodes_cfg: list) -> list:
             result.append({
                 "id": nid, "name": n.get("name", nid), "host": n.get("host", ""),
                 "reachable": True, "error": None,
-                "seqno":             s.get("seqno", 100000),
-                "safe_to_bootstrap": s.get("safe_to_bootstrap", 0),
-                "uuid":              s.get("uuid", "unknown"),
+                "seqno":             seqno_val,
+                "safe_to_bootstrap": 1 if nid == nodes_cfg[0]["id"] else 0,
+                "uuid":              "5a7b1c2d-dead-beef-cafe-0123456789ab",
             })
     return result
 
 
-# ── garbd mock status ─────────────────────────────────────────
+# ── garbd mock status ────────────────────────────────────────
 def mock_garbd_status(arb_cfg: dict) -> dict:
     if not arb_cfg.get("enabled"):
         return {"enabled": False, "online": False}
     if _scenario in ("gc01_down", "gc02_down"):
-        return {"enabled": True, "online": True, "host": arb_cfg.get("host",""),
+        return {"enabled": True, "online": True, "host": arb_cfg.get("host", ""),
                 "members": 2, "last_seen_sec": 0}
-    return {"enabled": True, "online": True, "host": arb_cfg.get("host",""),
+    return {"enabled": True, "online": True, "host": arb_cfg.get("host", ""),
             "members": 2, "last_seen_sec": int(time.time() - _garbd["last_seen"])}
 
 
 # ── mock SSH action execution ─────────────────────────────────
 def mock_ssh_action(node_id: str, action: str, cmd: str) -> dict:
     """Simulate SSH command execution result."""
-    time.sleep(0.3)  # simulate network latency
+    time.sleep(0.3)
     if _scenario in ("gc01_down",) and node_id == "gc01":
         return {"exit_code": 255, "stdout": "", "stderr": f"ssh: connect to host {node_id}: Connection timed out"}
     if _scenario in ("gc02_down",) and node_id == "gc02":
         return {"exit_code": 1, "stdout": "", "stderr": "Connection refused"}
 
     outputs = {
-        "start":   ("", 0),    # systemctl start exits 0 silently
+        "start":   ("", 0),
         "stop":    ("", 0),
         "restart": ("", 0),
         "rejoin":  ("", 0),
         "galera_new_cluster": ("", 0),
     }
     stdout, code = outputs.get(action, ("", 0))
-    # update mock seqno on rejoin
-    if action in ("start", "restart", "rejoin") and node_id in _seqno:
-        elapsed = int(time.time() - _start)
-        _seqno[node_id]["seqno"] = _commit_base.get(node_id, 100000) + elapsed * 3
     return {"exit_code": code, "stdout": stdout, "stderr": ""}
 
 
-# ── mock bootstrap sequence ───────────────────────────────────
+# ── mock bootstrap sequence ──────────────────────────────────
 def mock_bootstrap(candidate_id: str, all_nodes: list) -> list:
     """Return step-by-step bootstrap result."""
     elapsed = int(time.time() - _start)
-    seqno_val = _commit_base.get(candidate_id, 100000) + elapsed * 3
+    seqno_val = _node_base_seqno(candidate_id) + elapsed * 3
     steps = [
         {"step": 1, "status": "ok",
          "message": f"Анализ grastate.dat: {candidate_id} имеет seqno={seqno_val}, safe_to_bootstrap=1"},
@@ -161,8 +159,8 @@ def mock_bootstrap(candidate_id: str, all_nodes: list) -> list:
     for i, n in enumerate(joiners, 4):
         steps.append({"step": i, "status": "ok",
                       "message": f"SSH → {n['id']}: systemctl start mariadb.service — IST начат…"})
-        steps.append({"step": i+1, "status": "ok",
+        steps.append({"step": i + 1, "status": "ok",
                       "message": f"{n['id']}: wsrep_local_state_comment = Synced ✓ (cluster_size={i})"})
-    steps.append({"step": len(steps)+1, "status": "done",
+    steps.append({"step": len(steps) + 1, "status": "done",
                   "message": "Bootstrap завершён. Кластер восстановлен."})
     return steps

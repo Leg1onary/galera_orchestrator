@@ -40,28 +40,25 @@ def USE_MOCK(cfg: dict) -> bool:
 
 def get_cluster_status(cfg: dict) -> dict:
     nodes_cfg = cfg.get("nodes", [])
-    arb_cfg   = cfg.get("arbitrator", {})
-    results   = []
+    # Support both singular 'arbitrator' (legacy) and plural 'arbitrators' list
+    arbs_cfg  = cfg.get("arbitrators", [])
+    if not arbs_cfg:
+        arb_single = cfg.get("arbitrator", {})
+        if arb_single:
+            arbs_cfg = [arb_single]
 
+    results = []
     enabled_nodes = [n for n in nodes_cfg if n.get("enabled", True)]
 
     if USE_MOCK(cfg):
-        # Mock — последовательно (быстро, нет смысла в параллелизме)
         for n in enabled_nodes:
             results.append(mock_node_status(n["id"], n))
     else:
-        # Real — параллельный опрос всех нод одновременно
         from concurrent.futures import ThreadPoolExecutor, as_completed
-        # futures = {}
-        #with ThreadPoolExecutor(max_workers=len(enabled_nodes) or 1) as pool:
-        #    for n in enabled_nodes:
-        #        fut = pool.submit(_real_node_status, n, cfg)
-        #        futures[fut] = n["id"]
-        # Собираем в порядке исходного списка (не as_completed — сохраняем порядок)
         ordered = {n["id"]: None for n in enabled_nodes}
         with ThreadPoolExecutor(max_workers=len(enabled_nodes) or 1) as pool:
             fmap = {pool.submit(_real_node_status, n, cfg): n["id"] for n in enabled_nodes}
-            for fut in as_completed(fmap, timeout=12):   # ← as_completed: берём тех кто ответил первым
+            for fut in as_completed(fmap, timeout=12):
                 nid = fmap[fut]
                 try:
                     ordered[nid] = fut.result()
@@ -72,7 +69,7 @@ def get_cluster_status(cfg: dict) -> dict:
                     }
         results = [ordered[n["id"]] for n in enabled_nodes]
 
-    # Обогащаем каждый result ssh/dc полями из nodes_cfg (они не приходят из wsrep-запроса)
+    # Enrich results with ssh/dc fields from nodes_cfg
     _cfg_by_id = {n["id"]: n for n in enabled_nodes}
     for r in results:
         nid = r.get("id")
@@ -97,6 +94,15 @@ def get_cluster_status(cfg: dict) -> dict:
         "critical"
     )
 
+    # Build arbitrator statuses
+    from mock_data import mock_garbd_status
+    arb_statuses = []
+    for arb in arbs_cfg:
+        if USE_MOCK(cfg):
+            arb_statuses.append(mock_garbd_status(arb))
+        else:
+            arb_statuses.append(_arb_status_real(arb))
+
     return {
         "cluster_name":   cfg.get("cluster", {}).get("name", "galera-cluster"),
         "environment":    cfg.get("cluster", {}).get("environment", "test"),
@@ -108,7 +114,10 @@ def get_cluster_status(cfg: dict) -> dict:
         "flow_control":   round(fc_paused, 2),
         "cert_failures":  cert_fail,
         "use_mock":       USE_MOCK(cfg),
-        "arbitrator":     _arb_status(arb_cfg, cfg),
+        # Legacy single arbitrator field (kept for backwards compat with old UI code)
+        "arbitrator":     arb_statuses[0] if arb_statuses else {"enabled": False, "online": False},
+        # New list field for multi-arbitrator UI
+        "arbitrators":    arb_statuses,
         "nodes":          results,
     }
 
@@ -128,9 +137,8 @@ def _real_node_status(node: dict, cfg: dict) -> dict:
         base["error"] = "pymysql not installed"
         return base
 
-    # Per-node credentials имеют приоритет над глобальными
     db_cfg = cfg.get("db", {})
-    user   = node.get("db_user")   or db_cfg.get("user",     "monitor")
+    user   = node.get("db_user")     or db_cfg.get("user",     "monitor")
     passwd = node.get("db_password") or db_cfg.get("password", "")
 
     try:
@@ -153,7 +161,6 @@ def _real_node_status(node: dict, cfg: dict) -> dict:
         status = {row[0]: row[1] for row in rows}
         read_only_val = ro_rows[0][1].upper() if ro_rows else 'OFF'
 
-        # cast numeric fields
         def _int(k):
             try: return int(status.get(k, 0))
             except: return 0
@@ -173,7 +180,6 @@ def _real_node_status(node: dict, cfg: dict) -> dict:
             "wsrep_local_recv_queue":       _int("wsrep_local_recv_queue"),
             "wsrep_flow_control_paused":    str(round(_float("wsrep_flow_control_paused"), 4)),
             "wsrep_local_commits":          _int("wsrep_local_commits"),
-            # wsrep_last_committed — последний применённый seqno, нужен для bootstrap-анализа
             "wsrep_last_committed":         _int("wsrep_last_committed"),
             "wsrep_local_cert_failures":    _int("wsrep_local_cert_failures"),
             "wsrep_bf_aborts":              _int("wsrep_bf_aborts"),
@@ -183,7 +189,6 @@ def _real_node_status(node: dict, cfg: dict) -> dict:
             "wsrep_cluster_state_uuid":     status.get("wsrep_cluster_state_uuid", ""),
             "read_only":                    read_only_val == "ON",
         })
-        # Dynamic pickup: add any WSREP_VARS not already mapped manually above
         _already = set(base.keys())
         for _var in WSREP_VARS:
             if _var not in _already and _var in status:
@@ -200,13 +205,8 @@ def _real_node_status(node: dict, cfg: dict) -> dict:
     return base
 
 
-def _arb_status(arb_cfg: dict, cfg: dict) -> dict:
-    if not arb_cfg.get("enabled"):
-        return {"enabled": False, "online": False, "host": ""}
-    if USE_MOCK(cfg):
-        from mock_data import mock_garbd_status
-        return mock_garbd_status(arb_cfg)
-    # Real mode — SSH: systemctl is-active garbd
+def _arb_status_real(arb_cfg: dict) -> dict:
+    """Real mode SSH check for a single arbitrator."""
     try:
         import paramiko
         from pathlib import Path
@@ -227,6 +227,8 @@ def _arb_status(arb_cfg: dict, cfg: dict) -> dict:
             "enabled": True,
             "online":  ec == 0 and out == "active",
             "host":    arb_cfg.get("host", ""),
+            "id":      arb_cfg.get("id", ""),
+            "dc":      arb_cfg.get("dc", ""),
             "state":   out,
             "error":   None,
         }
@@ -234,6 +236,6 @@ def _arb_status(arb_cfg: dict, cfg: dict) -> dict:
         return {"enabled": True, "online": None, "host": arb_cfg.get("host", ""),
                 "error": "paramiko not installed"}
     except Exception as e:
-        log.warning(f"[garbd] SSH check failed: {e}")
+        log.warning(f"[garbd {arb_cfg.get('id', '')}] SSH check failed: {e}")
         return {"enabled": True, "online": False, "host": arb_cfg.get("host", ""),
-                "error": str(e)}
+                "id": arb_cfg.get("id", ""), "error": str(e)}

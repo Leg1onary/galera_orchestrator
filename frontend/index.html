@@ -494,15 +494,16 @@
 
         /* --- TOPOLOGY SVG --- */
         .topology-wrap {
-            background: var(--surface);
-            border: 1px solid var(--border);
+            background: var(--color-surface, var(--surface));
+            border: 1px solid var(--color-border, var(--border));
             border-radius: var(--radius-xl);
             padding: var(--space-8);
             box-shadow: var(--shadow-sm);
             margin-bottom: var(--space-6);
             text-align: center;
         }
-        .topology-svg { max-width: 900px; margin: 0 auto; width: 100%; display: block; overflow: visible; }
+        .topology-svg { max-width: 100%; margin: 0 auto; width: 100%; display: block; overflow: visible; color: var(--color-text, var(--text)); }
+        .topology-svg text { fill: currentColor; }
         .topo-node-card { cursor: default; transition: filter 0.2s; }
         .topo-node-card:hover { filter: brightness(1.05); }
 
@@ -1163,12 +1164,12 @@
                         <label class="form-label">Выбрать Bootstrap-кандидата</label>
                         <div style="display:flex;flex-direction:column;gap:var(--space-2)" id="bootstrapCandidates"></div>
                     </div>
-                    <div style="display:flex;gap:var(--space-2);margin-bottom:var(--space-3)">
-                        <button class="btn btn-ghost" style="flex:1" onclick="App.refreshSeqno()" title="Обновить seqno из grastate.dat">
+                    <div style="display:flex;flex-wrap:wrap;gap:var(--space-2);margin-bottom:var(--space-3)">
+                        <button class="btn btn-ghost" style="flex:1;min-width:200px;white-space:nowrap" onclick="App.refreshSeqno()" title="Обновить seqno из grastate.dat">
                             <svg width="14" height="14" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2.5"><polyline points="23 4 23 10 17 10"/><path d="M20.49 15a9 9 0 1 1-.02-8.49"/></svg>
                             Обновить seqno (grastate.dat)
                         </button>
-                        <button class="btn btn-ghost" style="flex:1" onclick="App.runWsrepRecover()" title="mysqld --wsrep-recover на всех нодах (MariaDB должна быть остановлена!)">
+                        <button class="btn btn-ghost" style="flex:1;min-width:200px;white-space:nowrap" onclick="App.runWsrepRecover()" title="mysqld --wsrep-recover на всех нодах (MariaDB должна быть остановлена!)">
                             <svg width="14" height="14" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2.5"><circle cx="11" cy="11" r="8"/><line x1="21" y1="21" x2="16.65" y2="16.65"/></svg>
                             wsrep-recover (seqno=-1)
                         </button>
@@ -1231,11 +1232,11 @@
                     </p>
                     <div class="form-row">
                         <div class="form-group">
-                            <label class="form-label">Нода-реципиент <span>(кто получает данные)</span></label>
+                            <label class="form-label">Нода-реципиент<br><span style="font-size:var(--text-xs);color:var(--color-text-muted);font-weight:400">(кто получает данные)</span></label>
                             <select class="form-input" id="sstRecipientSelect"><option value="">— выберите ноду —</option></select>
                         </div>
                         <div class="form-group">
-                            <label class="form-label">Донор <span>(кто отдаёт данные)</span></label>
+                            <label class="form-label">Донор<br><span style="font-size:var(--text-xs);color:var(--color-text-muted);font-weight:400">(кто отдаёт данные)</span></label>
                             <select class="form-input" id="sstDonorSelect"><option value="">— выберите донора —</option></select>
                         </div>
                     </div>
@@ -2631,7 +2632,10 @@
         }
         // Применяем сразу при загрузке
         setTheme(isDark);
-        themeBtn.addEventListener('click', function() { setTheme(!isDark); });
+        themeBtn.addEventListener('click', function() {
+            setTheme(!isDark);
+            if (typeof renderTopology === 'function') setTimeout(renderTopology, 30);
+        });
 
         // ---- DATA MODEL ----
         // Эталон mock-данных — восстанавливается при переключении real→mock
@@ -2972,13 +2976,13 @@
             }
 
             // ── layout constants ─────────────────────────────────────────────────
-            var NODE_W   = 190;
-            var NODE_H   = 120;
+            var NODE_W   = 210;
+            var NODE_H   = 125;
             var NODE_RX  = 12;
             var BADGE_H  = 24;
-            var BADGE_Y_OFF = 72; // offset from node top
-            var H_GAP    = 36;   // horizontal gap between nodes
-            var PADDING  = 40;   // left/right canvas padding
+            var BADGE_Y_OFF = 76; // offset from node top
+            var H_GAP    = 60;   // horizontal gap between nodes
+            var PADDING  = 50;   // left/right canvas padding
             var TOP_LABEL_H = 28;
             var NODE_ROW_Y = TOP_LABEL_H + 20;
             var ARB_H    = 100;
@@ -3048,7 +3052,7 @@
                         parts.push('<path d="M' + pi.cx + ' ' + pi.cy + ' Q' + ((pi.cx+pj.cx)/2) + ' ' + midY + ' ' + pj.cx + ' ' + pj.cy + '" fill="none" stroke="' + lineColor + '" stroke-width="2"' + lineDash + ' stroke-linecap="round" opacity="0.7"/>');
                         // label on first pair only for 2 nodes
                         if (i === 0 && j === 1) {
-                            parts.push('<text x="' + ((pi.cx+pj.cx)/2) + '" y="' + (midY - 6) + '" text-anchor="middle" font-family="JetBrains Mono,monospace" font-size="10" style="fill:' + lineColor + '" opacity="0.9">' + (lineOk ? 'IST / SST' : 'DISCONNECTED') + '</text>');
+                            parts.push('<text x="' + ((pi.cx+pj.cx)/2) + '" y="' + (midY - 12) + '" text-anchor="middle" font-family="JetBrains Mono,monospace" font-size="10" style="fill:' + lineColor + '" opacity="0.9">' + (lineOk ? 'IST / SST' : 'DISCONNECTED') + '</text>');
                         }
                     } else {
                         parts.push('<line x1="' + pi.cx + '" y1="' + pi.cy + '" x2="' + pj.cx + '" y2="' + pj.cy + '" stroke="' + lineColor + '" stroke-width="1.5"' + lineDash + ' stroke-linecap="round" opacity="0.5"/>');
@@ -4672,7 +4676,7 @@
         function renderMaintNodeSelect() {
             var sel = document.getElementById('maintNodeSelect');
             if (!sel) return;
-            var prev = _maint.nodeId || sel.value;
+            var prev = (_maint && _maint.nodeId) || (sel && sel.value) || '';
             var opts = '<option value="">— выберите ноду —</option>';
             (clusterData.nodes||[]).forEach(function(nd){
                 opts += '<option value="'+nd.id+'"'+(nd.id===prev?' selected':'')+'>'+(nd.name||nd.id)+' ('+(nd.host||'')+')</option>';

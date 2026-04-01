@@ -296,6 +296,7 @@
             border: 1px solid transparent;
             cursor: pointer;
             white-space: nowrap;
+            text-decoration: none;
         }
         .btn svg { flex-shrink: 0; }
         .btn-primary   { background: var(--primary); color: #fff; }
@@ -5874,6 +5875,14 @@
                     fmt: function(v) { var n=parseInt(v)||0; return { text: n.toString(), color: n===0?'var(--color-text)':'var(--color-warning)' }; } },
                 { key: 'wsrep_bf_aborts',     label: 'BF Aborts',
                     fmt: function(v) { var n=parseInt(v)||0; return { text: n.toString(), color: n===0?'var(--color-text)':'var(--color-warning)' }; } },
+                { key: 'wsrep_local_send_queue', label: 'Send Queue',
+                    fmt: function(v) { var n=parseInt(v)||0; return { text: n.toString(), color: n===0?'var(--color-success)':n<5?'var(--color-warning)':'var(--color-error)' }; } },
+                { key: 'wsrep_incoming_addresses', label: 'Incoming Addresses',
+                    fmt: function(v) { return { text: v||'—', color: '' }; } },
+                { key: 'wsrep_gcomm_uuid',         label: 'Group UUID',
+                    fmt: function(v) { return { text: v ? v.slice(0,13)+'…' : '—', color: '' }; } },
+                { key: 'wsrep_protocol_version',   label: 'Protocol Ver',
+                    fmt: function(v) { return { text: v||'—', color: '' }; } },
             ];
 
             var nodeHeaders = nodes.map(function(n) {

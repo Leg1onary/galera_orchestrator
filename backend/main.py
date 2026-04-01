@@ -1065,6 +1065,66 @@ async def sst_status_2(node_id: str):
     return await sst_status(node_id)
 
 
+# ── NODE SSH PING ─────────────────────────────────────────────
+@app.get("/api/node/{node_id}/ping")
+async def node_ping(node_id: str):
+    """Quick SSH reachability check + systemctl is-active mariadb.service."""
+    import time as _t
+    cfg      = load_config()
+    use_mock = cfg.get("settings", {}).get("use_mock", True)
+    node     = next((n for n in cfg.get("nodes", []) if n["id"] == node_id), None)
+    if not node:
+        raise HTTPException(404, f"Node '{node_id}' not found")
+
+    if use_mock:
+        return {
+            "ok":         True,
+            "mock":       True,
+            "node_id":    node_id,
+            "reachable":  True,
+            "latency_ms": 2,
+            "service":    "active",
+        }
+
+    t0 = _t.monotonic()
+    try:
+        import paramiko
+    except ImportError:
+        raise HTTPException(500, "paramiko not installed")
+    try:
+        client = paramiko.SSHClient()
+        client.set_missing_host_key_policy(paramiko.AutoAddPolicy())
+        client.connect(
+            node.get("host"), port=int(node.get("ssh_port", 22)),
+            username=node.get("ssh_user", "root"),
+            key_filename=str(Path(node.get("ssh_key", "~/.ssh/id_rsa")).expanduser()),
+            timeout=6, banner_timeout=6,
+        )
+        _, so, _ = client.exec_command("systemctl is-active mariadb.service", timeout=5)
+        service_state = so.read().decode(errors="replace").strip()
+        client.close()
+        latency = int((_t.monotonic() - t0) * 1000)
+        return {
+            "ok":         True,
+            "mock":       False,
+            "node_id":    node_id,
+            "reachable":  True,
+            "latency_ms": latency,
+            "service":    service_state,
+        }
+    except Exception as e:
+        latency = int((_t.monotonic() - t0) * 1000)
+        return {
+            "ok":         False,
+            "mock":       False,
+            "node_id":    node_id,
+            "reachable":  False,
+            "latency_ms": latency,
+            "service":    "unknown",
+            "error":      str(e),
+        }
+
+
 # ── ENTRYPOINT ────────────────────────────────────────────────
 if __name__ == "__main__":
     import uvicorn

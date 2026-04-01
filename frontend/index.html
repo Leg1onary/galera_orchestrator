@@ -3597,7 +3597,7 @@
             var multiDc = dcKeys.length > 1;
             el.innerHTML = dcKeys.map(function(dc) {
                 var rows = dcArbMap[dc].map(function(arb) {
-                    var arbId = arb.id || 'arb'; var arbSsh = arb.ssh || arb.ssh_port || 22;
+                    var arbId = arb.id || ('arb_' + (arb.host || '').replace(/[^a-z0-9]/gi, '_')) || 'arb01'; var arbSsh = arb.ssh || arb.ssh_port || 22;
                     return '<div class="node-list-item" style="border-left:3px solid var(--warning);' + (multiDc ? 'margin-left:var(--space-2)' : '') + '">' +
                         '<div class="nli-info">' +
                         '<div class="nli-name">garbd · ' + arbId + '</div>' +
@@ -4288,6 +4288,9 @@
                 if (page === 'diagnostics') {
                     setTimeout(function() { Diag.init(); InnodbStatus.init(); }, 50);
                 }
+                if (page === 'recovery') {
+                    setTimeout(function() { renderBootstrapCandidates(); }, 30);
+                }
             },
 
             applyScenario: function(key) {
@@ -4410,7 +4413,13 @@
                         icon:  '🔗', ok: 'btn-primary' },
                     start:   { title: 'Start MariaDB на ' + node.name + '?',
                         msg:   'Запустить сервис и присоединиться к кластеру.',
-                        icon:  '▶️', ok: 'btn-success' }
+                        icon:  '▶️', ok: 'btn-success' },
+                    set_read_only:  { title: 'Включить Read-Only на ' + node.name + '?',
+                        msg:   'SET GLOBAL read_only = ON. Нода перестанет принимать запись. Репликация продолжит работу.',
+                        icon:  '🔒', ok: 'btn-warning' },
+                    set_read_write: { title: 'Снять Read-Only с ' + node.name + '?',
+                        msg:   'SET GLOBAL read_only = OFF. Нода снова будет принимать запросы на запись.',
+                        icon:  '✏️', ok: 'btn-success' }
                 };
                 var d = msgs[action];
                 if (!d) return;
@@ -4419,7 +4428,9 @@
                     if (_dataMode === 'real') {
                         // Real mode — SSH через backend API
                         var apiBase = getApiBase();
-                        node.state = (action === 'stop') ? 'Offline' : 'Joiner';
+                        if (action !== 'set_read_only' && action !== 'set_read_write') {
+                            node.state = (action === 'stop') ? 'Offline' : 'Joiner';
+                        }
                         renderAll();
                         var _actionBody = { action: action };
                         if (action === 'rejoin') {
@@ -4689,6 +4700,7 @@
             doRejoin: function() {
                 var nodeId = document.getElementById('rejoinNodeSelect').value;
                 var method = document.getElementById('rejoinMethod').value;
+                if (!nodeId) { toast('warning', 'Выберите ноду для Rejoin'); return; }
                 confirm('🔗', 'Rejoin ноды ' + nodeId + '?',
                     'Метод: ' + method + '. Нода получит IST или SST от донора.', 'btn-primary').then(function(ok) {
                     if (!ok) return;
@@ -5090,7 +5102,7 @@
                 var arbs = (clusterData.arbitrators && clusterData.arbitrators.length)
                     ? clusterData.arbitrators
                     : (clusterData.arbitrator ? [clusterData.arbitrator] : []);
-                var arb = arbs.find(function(a) { return a.id === arbId; });
+                var arb = arbs.find(function(a) { return a.id === arbId || (!a.id && arbId === ('arb_' + (a.host||'').replace(/[^a-z0-9]/gi,'_'))); }) || null;
                 if (!arb) { toast('error', 'Арбитр не найден'); return; }
                 var modal = document.getElementById('editArbModal');
                 if (!modal) { toast('error', 'Модальное окно не найдено'); return; }

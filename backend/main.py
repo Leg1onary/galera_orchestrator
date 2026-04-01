@@ -3,7 +3,7 @@ from collections import deque
 from contextlib import asynccontextmanager
 from datetime import datetime
 from pathlib import Path
-from fastapi import FastAPI, WebSocket, WebSocketDisconnect, HTTPException
+from fastapi import FastAPI, WebSocket, WebSocketDisconnect, HTTPException, Request
 from fastapi.responses import HTMLResponse, FileResponse
 from fastapi.staticfiles import StaticFiles
 from pydantic import BaseModel
@@ -39,22 +39,30 @@ _prev_status: dict = {}
 
 
 def _push_event(level: str, message: str, source: str = "system"):
-    """Alias — delegates to _push_event_ws once WS manager is available."""
+    """Broadcast an event to all WebSocket clients and append to the in-memory log.
+
+    Uses ``app.state.ws_manager`` for WebSocket delivery so there is no
+    hidden global dependency — the manager is injected via FastAPI's
+    application state during lifespan startup.
+    """
     entry = {
-        "ts":     datetime.now().strftime("%Y-%m-%d %H:%M:%S"),
-        "level":  level.upper(),
+        "ts":      datetime.now().strftime("%Y-%m-%d %H:%M:%S"),
+        "level":   level.upper(),
         "message": message,
-        "source": source,
+        "source":  source,
     }
     _event_log.appendleft(entry)
-    getattr(log, level.lower() if level.lower() in ("debug","info","warning","error","critical") else "info",
-            log.info)("[%s] %s", source, message)
-    # Broadcast via WebSocket if manager is ready (lazy reference)
+    getattr(
+        log,
+        level.lower() if level.lower() in ("debug", "info", "warning", "error", "critical") else "info",
+        log.info,
+    )("[%s] %s", source, message)
+    # Broadcast via WebSocket manager stored in app.state (set during lifespan).
+    # Falls back gracefully when called before startup (e.g. import-time code).
     try:
-        mgr = globals().get("_ws_manager")
-        if mgr is not None:
-            loop = asyncio.get_running_loop()
-            loop.create_task(mgr.broadcast({"type": "event", **entry}))
+        mgr = app.state.ws_manager  # type: ignore[attr-defined]
+        loop = asyncio.get_running_loop()
+        loop.create_task(mgr.broadcast({"type": "event", **entry}))
     except Exception:
         pass
 
@@ -85,6 +93,10 @@ def _check_rate_limit(node_id: str) -> None:
 
 @asynccontextmanager
 async def lifespan(app: FastAPI):
+    # Attach WebSocket manager to app.state so every part of the codebase
+    # can reach it via ``app.state.ws_manager`` without touching module globals.
+    app.state.ws_manager = _WsManager()
+
     cfg   = load_config()
     nodes = [n["id"] for n in cfg.get("nodes", []) if n.get("enabled")]
     arbs  = [a for a in cfg.get("arbitrators", []) if a.get("enabled", True)]
@@ -95,6 +107,8 @@ async def lifespan(app: FastAPI):
     )
     _push_event("info", f"Galera Orchestrator started | nodes={nodes} | arbitrators={len(arbs)} | mode={mode}", "system")
     yield
+    # Graceful shutdown — disconnect all WebSocket clients
+    await app.state.ws_manager.shutdown()
 
 
 app = FastAPI(title="Galera Orchestrator", lifespan=lifespan)
@@ -1079,16 +1093,34 @@ class _WsManager:
     def count(self):
         return len(self._clients)
 
-_ws_manager = _WsManager()
+    async def shutdown(self):
+        """Close all active WebSocket connections on application shutdown."""
+        async with self._lock:
+            clients = list(self._clients)
+            self._clients.clear()
+        for ws in clients:
+            try:
+                await ws.close()
+            except Exception:
+                pass
+
+# Module-level sentinel: used only during import/startup before lifespan runs.
+# After lifespan startup ``app.state.ws_manager`` is the authoritative instance.
+_ws_manager_sentinel: "_WsManager | None" = None
 
 
 
 
 
 @app.websocket("/ws/cluster")
-async def ws_cluster(ws: WebSocket):
-    """Main cluster WebSocket: sends status on interval + events in real time."""
-    await _ws_manager.connect(ws)
+async def ws_cluster(ws: WebSocket, request: Request):
+    """Main cluster WebSocket: sends status on interval + events in real time.
+
+    The WebSocket manager is retrieved from ``request.app.state.ws_manager``
+    (set during lifespan) instead of a module-level global.
+    """
+    mgr: _WsManager = request.app.state.ws_manager
+    await mgr.connect(ws)
     try:
         # Send initial status immediately
         cfg  = load_config()
@@ -1116,7 +1148,7 @@ async def ws_cluster(ws: WebSocket):
     except Exception:
         pass
     finally:
-        await _ws_manager.disconnect(ws)
+        await mgr.disconnect(ws)
 
 if __name__ == "__main__":
     import uvicorn

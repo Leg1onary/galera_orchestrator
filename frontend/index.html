@@ -1514,9 +1514,16 @@
                     <div class="card-title">
                         <svg width="16" height="16" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2"><rect x="2" y="3" width="20" height="14" rx="2"/><line x1="8" y1="21" x2="16" y2="21"/><line x1="12" y1="17" x2="12" y2="21"/></svg>
                         Системные ресурсы
+                        <span id="sysHealthBadge" style="display:none;font-size:var(--text-xs);padding:2px 9px;border-radius:9999px;font-weight:700;margin-left:8px"></span>
                     </div>
                     <div style="display:flex;gap:var(--space-2);align-items:center">
                         <span id="sysHealthChecked" style="font-size:0.72rem;color:var(--color-text-muted)"></span>
+                        <button id="btnSysHealthAuto" class="btn btn-sm" title="Авто-обновление каждые 30 сек"
+                                style="background:var(--color-surface-offset);border:1px solid var(--color-border)"
+                                onclick="Diag.toggleSysHealthAuto()">
+                            <svg width="13" height="13" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2.5"><circle cx="12" cy="12" r="10"/><polyline points="12 6 12 12 16 14"/></svg>
+                            Авто
+                        </button>
                         <button class="btn btn-primary btn-sm" onclick="Diag.checkSystemHealth()">
                             <svg width="13" height="13" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2.5"><polyline points="23 4 23 10 17 10"/><path d="M20.49 15a9 9 0 1 1-.02-8.49"/></svg>
                             Проверить
@@ -5956,6 +5963,24 @@
 
 
 
+        _sysHealthAutoTimer: null,
+        _sysHealthAutoInterval: 30000,
+
+        toggleSysHealthAuto: function() {
+            var btn = document.getElementById('btnSysHealthAuto');
+            if (Diag._sysHealthAutoTimer) {
+                clearInterval(Diag._sysHealthAutoTimer);
+                Diag._sysHealthAutoTimer = null;
+                if (btn) { btn.style.background = 'var(--color-surface-offset)'; btn.style.color = ''; }
+                _bd_addLog('INFO', 'System Health: авто-обновление остановлено');
+            } else {
+                Diag.checkSystemHealth();
+                Diag._sysHealthAutoTimer = setInterval(function() { Diag.checkSystemHealth(); }, Diag._sysHealthAutoInterval);
+                if (btn) { btn.style.background = 'var(--color-primary)'; btn.style.color = '#fff'; }
+                _bd_addLog('INFO', 'System Health: авто-обновление каждые 30 сек');
+            }
+        },
+
         checkSystemHealth: function() {
             var apiBase = _bd_getApiBase();
             var container = document.getElementById('sysHealthContainer');
@@ -5968,6 +5993,21 @@
                 .then(function(r) { return r.json(); })
                 .then(function(data) {
                     if (checked) checked.textContent = 'проверено в ' + (data.checked_at || '');
+
+                    // Update summary badge
+                    var badge = document.getElementById('sysHealthBadge');
+                    if (badge) {
+                        if (data.crit_count) {
+                            badge.textContent = data.crit_count + ' КРИТИЧНО';
+                            badge.style.cssText = 'display:inline-block;font-size:var(--text-xs);padding:2px 9px;border-radius:9999px;font-weight:700;margin-left:8px;background:var(--color-error);color:#fff';
+                        } else if (data.warn_count) {
+                            badge.textContent = data.warn_count + ' ПРЕДУПРЕЖДЕНИЕ';
+                            badge.style.cssText = 'display:inline-block;font-size:var(--text-xs);padding:2px 9px;border-radius:9999px;font-weight:700;margin-left:8px;background:var(--color-warning);color:#fff';
+                        } else {
+                            badge.textContent = '✓ ОК';
+                            badge.style.cssText = 'display:inline-block;font-size:var(--text-xs);padding:2px 9px;border-radius:9999px;font-weight:700;margin-left:8px;background:var(--color-success);color:#fff';
+                        }
+                    }
 
                     if (!data.results || !data.results.length) {
                         if (container) container.innerHTML = '<div style="padding:var(--space-4);color:var(--color-text-muted)">Нет нод</div>';
@@ -5984,14 +6024,17 @@
                             + '</div>';
                     }
 
+                    var mockBadgeHtml = data.mock ? '<span style="font-size:0.7rem;background:var(--color-warning);color:#fff;padding:2px 8px;border-radius:4px;margin-left:8px;vertical-align:middle">MOCK</span>' : '';
+                    var thStyle = 'padding:8px 12px;font-size:0.75rem;color:var(--color-text-muted);text-align:left;border-bottom:1px solid var(--color-border);white-space:nowrap';
                     var html = '<div style="overflow-x:auto"><table style="width:100%;border-collapse:collapse">'
                         + '<thead><tr>'
-                        + '<th style="padding:8px 12px;font-size:0.75rem;color:var(--color-text-muted);text-align:left;border-bottom:1px solid var(--color-border)">Нода</th>'
-                        + '<th style="padding:8px 12px;font-size:0.75rem;color:var(--color-text-muted);text-align:left;border-bottom:1px solid var(--color-border)">Диск /var/lib/mysql</th>'
-                        + '<th style="padding:8px 12px;font-size:0.75rem;color:var(--color-text-muted);text-align:left;border-bottom:1px solid var(--color-border)">Диск /</th>'
-                        + '<th style="padding:8px 12px;font-size:0.75rem;color:var(--color-text-muted);text-align:left;border-bottom:1px solid var(--color-border)">Память</th>'
-                        + '<th style="padding:8px 12px;font-size:0.75rem;color:var(--color-text-muted);text-align:left;border-bottom:1px solid var(--color-border)">Load avg</th>'
-                        + '<th style="padding:8px 12px;font-size:0.75rem;color:var(--color-text-muted);text-align:left;border-bottom:1px solid var(--color-border)">Uptime</th>'
+                        + '<th style="' + thStyle + '">Нода ' + mockBadgeHtml + '</th>'
+                        + '<th style="' + thStyle + '">Статус</th>'
+                        + '<th style="' + thStyle + '">Диск /mysql</th>'
+                        + '<th style="' + thStyle + '">Диск /</th>'
+                        + '<th style="' + thStyle + '">Память</th>'
+                        + '<th style="' + thStyle + '">Load avg (1/5/15m)</th>'
+                        + '<th style="' + thStyle + '">Uptime</th>'
                         + '</tr></thead><tbody>';
 
                     data.results.forEach(function(r) {
@@ -6015,11 +6058,17 @@
                                 + '</div></td>';
                         }
 
+                        var statusLabel = r.crit ? 'КРИТИЧНО' : r.warn ? 'ПРЕДУПРЕЖДЕНИЕ' : r.ok ? 'OK' : 'ОШИБКА';
+                        var statusLabelColor = r.crit ? 'var(--color-error)' : r.warn ? 'var(--color-warning)' : r.ok ? 'var(--color-success)' : 'var(--color-text-muted)';
                         html += '<tr style="' + rowBg + ';border-bottom:1px solid var(--color-divider)">'
-                            + '<td style="padding:8px 12px;font-weight:600">' + statusDot + ' ' + (r.name||r.node_id)
-                            + '<div style="font-size:0.72rem;color:var(--color-text-muted)">' + (r.host||'') + '</div>'
+                            + '<td style="padding:8px 12px;font-weight:600;white-space:nowrap">' + (r.name||r.node_id)
+                            + '<div style="font-size:0.72rem;color:var(--color-text-muted);font-weight:400">' + (r.host||'') + '</div>'
                             + (r.error ? '<div style="font-size:0.72rem;color:var(--color-error)">' + r.error + '</div>' : '')
                             + '</td>'
+                            + '<td style="padding:8px 12px;white-space:nowrap">'
+                            + '<span style="display:inline-flex;align-items:center;gap:5px;font-size:var(--text-xs);font-weight:700;background:color-mix(in oklab,' + statusLabelColor + ' 12%,transparent);color:' + statusLabelColor + ';padding:3px 10px;border-radius:9999px">'
+                            + statusDot + ' ' + statusLabel
+                            + '</span></td>'
                             + diskCell(dd)
                             + diskCell(dr)
                             + '<td style="padding:8px 12px;min-width:160px">'
@@ -6072,6 +6121,12 @@
             // D5: обновляем виджеты при каждом открытии страницы
             Diag.renderSeqnoDelta();
             Diag.renderWsrepQuick();
+
+            // D6: запустить System Health при первом открытии если ещё не загружено
+            var sysContainer = document.getElementById('sysHealthContainer');
+            if (sysContainer && !sysContainer.querySelector('table')) {
+                Diag.checkSystemHealth();
+            }
         },
 
         // C5: SHOW PROCESSLIST

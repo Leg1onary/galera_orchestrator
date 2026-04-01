@@ -1222,29 +1222,59 @@ async def diagnostics_system_health():
         return {"results": [], "all_ok": True, "checked_at": __import__("time").strftime("%H:%M:%S")}
 
     if use_mock:
-        import random, time as _t
+        import random as _rnd, time as _t
         mock_results = []
         for n in nodes:
-            disk_pct = random.randint(40, 75)
-            mem_pct  = random.randint(30, 65)
+            # Seed per-node per-minute → stable values within a minute, vary slowly
+            _seed = hash(n["id"]) ^ int(_t.time() // 60)
+            _rng  = _rnd.Random(_seed)
+            disk_pct = _rng.randint(42, 72)
+            mem_pct  = _rng.randint(28, 62)
+            root_pct = _rng.randint(18, 55)
+            load_1m  = round(_rng.uniform(0.1, 2.2), 2)
+            mem_total_gb = _rng.choice([16, 32, 64])
+            mem_used_gb  = round(mem_total_gb * mem_pct / 100, 1)
+            mem_free_gb  = round(mem_total_gb - mem_used_gb, 1)
+            disk_total_gb = 200
+            disk_used_gb  = round(disk_total_gb * disk_pct / 100)
+            disk_avail_gb = disk_total_gb - disk_used_gb
+            root_total_gb = 100
+            root_used_gb  = round(root_total_gb * root_pct / 100)
+            root_avail_gb = root_total_gb - root_used_gb
+            uptime_days   = _rng.randint(5, 300)
             mock_results.append({
                 "node_id": n["id"], "name": n.get("name", n["id"]), "host": n.get("host", ""),
                 "ok": True,
-                "disk_data":  {"path": "/var/lib/mysql", "used_pct": disk_pct, "used": f"{random.randint(10,80)}G", "avail": f"{random.randint(20,120)}G", "total": "200G"},
-                "disk_root":  {"path": "/",              "used_pct": random.randint(20, 60), "used": f"{random.randint(5,30)}G",  "avail": f"{random.randint(30,80)}G",  "total": "100G"},
-                "memory":     {"used_pct": mem_pct, "used": f"{random.randint(2,12)}G", "total": f"{random.randint(16,64)}G", "free": f"{random.randint(1,8)}G"},
-                "load_avg":   {"1m": round(random.uniform(0.1, 2.5), 2), "5m": round(random.uniform(0.1, 2.0), 2), "15m": round(random.uniform(0.1, 1.5), 2)},
-                "uptime":     f"up {random.randint(1, 300)} days",
+                "disk_data": {
+                    "path": "/var/lib/mysql", "used_pct": disk_pct,
+                    "used": f"{disk_used_gb}G", "avail": f"{disk_avail_gb}G", "total": f"{disk_total_gb}G",
+                },
+                "disk_root": {
+                    "path": "/", "used_pct": root_pct,
+                    "used": f"{root_used_gb}G", "avail": f"{root_avail_gb}G", "total": f"{root_total_gb}G",
+                },
+                "memory": {
+                    "used_pct": mem_pct,
+                    "used": f"{mem_used_gb}G", "total": f"{mem_total_gb}G", "free": f"{mem_free_gb}G",
+                },
+                "load_avg": {
+                    "1m":  load_1m,
+                    "5m":  round(load_1m * _rng.uniform(0.7, 1.1), 2),
+                    "15m": round(load_1m * _rng.uniform(0.5, 0.9), 2),
+                },
+                "uptime": f"up {uptime_days} days",
                 "warn": disk_pct >= 80 or mem_pct >= 85,
                 "crit": disk_pct >= 90 or mem_pct >= 95,
                 "mock": True,
             })
-        return {"results": mock_results, "all_ok": all(not r["crit"] for r in mock_results), "checked_at": _t.strftime("%H:%M:%S"), "mock": True}
-
-    try:
-        import paramiko
-    except ImportError:
-        raise HTTPException(500, "paramiko not installed")
+        return {
+            "results": mock_results,
+            "all_ok": all(not r["crit"] for r in mock_results),
+            "crit_count": sum(1 for r in mock_results if r["crit"]),
+            "warn_count": sum(1 for r in mock_results if r["warn"] and not r["crit"]),
+            "checked_at": _t.strftime("%H:%M:%S"),
+            "mock": True,
+        }
 
     def _parse_df(line: str) -> dict:
         """Parse a single df -h output line: Filesystem Size Used Avail Use% Mountpoint"""
@@ -1305,28 +1335,21 @@ async def diagnostics_system_health():
             "error": None,
         }
         try:
-            client = paramiko.SSHClient()
-            client.set_missing_host_key_policy(paramiko.AutoAddPolicy())
-            client.connect(
-                node.get("host"), port=int(node.get("ssh_port", 22)),
-                username=node.get("ssh_user", "root"),
-                key_filename=str(Path(node.get("ssh_key", "~/.ssh/id_rsa")).expanduser()),
+            # ssh_run opens ONE connection for all 4 commands
+            results_ssh = ssh_run(
+                node,
+                "df -h /var/lib/mysql 2>/dev/null | tail -1",
+                "df -h / 2>/dev/null | tail -1",
+                "free -h 2>/dev/null",
+                "uptime 2>/dev/null",
                 timeout=8,
             )
-            try:
-                cmds = {
-                    "df_data": "df -h /var/lib/mysql 2>/dev/null | tail -1",
-                    "df_root": "df -h / 2>/dev/null | tail -1",
-                    "free":    "free -h 2>/dev/null",
-                    "uptime":  "uptime 2>/dev/null",
-                }
-                raw = {}
-                for key, cmd in cmds.items():
-                    _, so, _ = client.exec_command(cmd, timeout=6)
-                    raw[key] = so.read().decode(errors="replace").strip()
-            finally:
-                client.close()
-
+            raw = {
+                "df_data": results_ssh[0][1] if len(results_ssh) > 0 else "",
+                "df_root": results_ssh[1][1] if len(results_ssh) > 1 else "",
+                "free":    results_ssh[2][1] if len(results_ssh) > 2 else "",
+                "uptime":  results_ssh[3][1] if len(results_ssh) > 3 else "",
+            }
             out["disk_data"] = _parse_df(raw.get("df_data", ""))
             out["disk_root"] = _parse_df(raw.get("df_root", ""))
             out["memory"]    = _parse_free(raw.get("free", ""))

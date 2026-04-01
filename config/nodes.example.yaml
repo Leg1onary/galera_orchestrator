@@ -7,19 +7,19 @@ nodes:
   - id: gc01
     name: gc01
     host: 192.168.1.10    # IP ноды
-    port: 3306
+    db_port: 3306
     ssh_port: 22
     ssh_user: root
     ssh_key: /home/user/.ssh/id_rsa    # абсолютный путь к ключу
     db_user: monitor_user              # per-node (опционально)
-    db_password: ""                    # per-node (опционально)
+    db_pass: ""                        # per-node (опционально)
     dc: DC1                            # Датацентр / сегмент
     enabled: true
 
   - id: gc02
     name: gc02
     host: 192.168.1.11
-    port: 3306
+    db_port: 3306
     ssh_port: 22
     ssh_user: root
     ssh_key: /home/user/.ssh/id_rsa
@@ -29,7 +29,7 @@ nodes:
   - id: gc03
     name: gc03
     host: 192.168.2.10
-    port: 3306
+    db_port: 3306
     ssh_port: 22
     ssh_user: root
     ssh_key: /home/user/.ssh/id_rsa
@@ -39,7 +39,7 @@ nodes:
   - id: gc04
     name: gc04
     host: 192.168.2.11
-    port: 3306
+    db_port: 3306
     ssh_port: 22
     ssh_user: root
     ssh_key: /home/user/.ssh/id_rsa

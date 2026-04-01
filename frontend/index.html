@@ -1151,45 +1151,36 @@
             </div>
 
             <div style="display:grid;grid-template-columns:repeat(auto-fill,minmax(440px,1fr));gap:var(--space-6);margin-bottom:var(--space-8)">
-                <!-- Bootstrap -->
-                <div class="form-section">
-                    <div class="form-section-title">
-                        <svg width="20" height="20" viewBox="0 0 24 24" fill="none" stroke="var(--warning)" stroke-width="2"><path d="M10.29 3.86L1.82 18a2 2 0 0 0 1.71 3h16.94a2 2 0 0 0 1.71-3L13.71 3.86a2 2 0 0 0-3.42 0z"/><line x1="12" y1="9" x2="12" y2="13"/><line x1="12" y1="17" x2="12.01" y2="17"/></svg>
-                        Bootstrap нового Primary
-                    </div>
-                    <p class="text-sm text-muted" style="margin-bottom:var(--space-4)">
-                        Используется при полном отказе кластера. Нода с наибольшим seqno должна быть запущена с <code style="font-family:var(--font-mono);background:var(--surface-3);padding:2px 5px;border-radius:4px">galera_new_cluster</code>.
-                    </p>
-                    <div class="form-group">
-                        <label class="form-label">Выбрать Bootstrap-кандидата</label>
-                        <div style="display:flex;flex-direction:column;gap:var(--space-2)" id="bootstrapCandidates"></div>
-                    </div>
-                    <div style="display:flex;flex-wrap:wrap;gap:var(--space-2);margin-bottom:var(--space-3)">
-                        <button class="btn btn-ghost" style="flex:1;min-width:200px;white-space:nowrap" onclick="App.refreshSeqno()" title="Обновить seqno из grastate.dat">
-                            <svg width="14" height="14" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2.5"><polyline points="23 4 23 10 17 10"/><path d="M20.49 15a9 9 0 1 1-.02-8.49"/></svg>
-                            Обновить seqno (grastate.dat)
-                        </button>
-                        <button class="btn btn-ghost" style="flex:1;min-width:200px;white-space:nowrap" onclick="App.runWsrepRecover()" title="mysqld --wsrep-recover на всех нодах (MariaDB должна быть остановлена!)">
-                            <svg width="14" height="14" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2.5"><circle cx="11" cy="11" r="8"/><line x1="21" y1="21" x2="16.65" y2="16.65"/></svg>
-                            wsrep-recover (seqno=-1)
-                        </button>
-                    </div>
-                    <div id="wsrepRecoverResultsTable"></div>
-                    <button class="btn btn-warning btn-lg" style="width:100%" onclick="App.doBootstrap()">
-                        <svg width="18" height="18" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2"><polygon points="5 3 19 12 5 21 5 3"/></svg>
-                        Запустить galera_new_cluster
-                    </button>
-                    <div style="margin-top:var(--space-5);padding:var(--space-4);background:rgba(161,44,123,.08);border:1px solid rgba(161,44,123,.25);border-radius:var(--radius-md)">
-                        <div style="font-size:var(--text-sm);font-weight:700;color:var(--error);margin-bottom:var(--space-2)">
-                            ⚠ Если все ноды имеют seqno: -1 (полный крах)
+                <!-- Bootstrap Wizard -->
+                <div class="wizard-wrap" id="bsWizardWrap" style="grid-column:1/-1">
+                    <div style="display:flex;align-items:center;justify-content:space-between;margin-bottom:var(--space-5);flex-wrap:wrap;gap:var(--space-3)">
+                        <div>
+                            <div style="font-size:var(--text-base);font-weight:700;color:var(--text);margin-bottom:4px">
+                                <svg width="16" height="16" viewBox="0 0 24 24" fill="none" stroke="var(--color-warning)" stroke-width="2" style="vertical-align:-2px;margin-right:6px"><path d="M10.29 3.86L1.82 18a2 2 0 0 0 1.71 3h16.94a2 2 0 0 0 1.71-3L13.71 3.86a2 2 0 0 0-3.42 0z"/><line x1="12" y1="9" x2="12" y2="13"/><line x1="12" y1="17" x2="12.01" y2="17"/></svg>
+                                Bootstrap Wizard
+                            </div>
+                            <div style="font-size:var(--text-sm);color:var(--text-muted)">Пошаговое восстановление кластера после полного отказа — автоматические переходы между шагами</div>
                         </div>
-                        <p style="font-size:var(--text-xs);color:var(--text-muted);margin-bottom:var(--space-3)">
-                            Установить <code style="font-family:var(--font-mono);background:var(--surface-3);padding:1px 4px;border-radius:3px">safe_to_bootstrap: 1</code> в <code style="font-family:var(--font-mono);background:var(--surface-3);padding:1px 4px;border-radius:3px">grastate.dat</code> вручную на выбранной ноде-кандидате. Только после этого выполнять Bootstrap.
-                        </p>
-                        <button class="btn btn-danger" style="width:100%" onclick="App.resetGrastate()">
-                            <svg width="14" height="14" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2.5"><path d="M10.29 3.86L1.82 18a2 2 0 0 0 1.71 3h16.94"/><line x1="12" y1="9" x2="12" y2="13"/></svg>
-                            Сбросить grastate.dat (safe_to_bootstrap=1)
-                        </button>
+                        <div style="display:flex;gap:var(--space-2);align-items:center;flex-wrap:wrap">
+                            <button class="btn btn-primary" id="bsWizardStartBtn" onclick="BsWizard.start()">
+                                <svg width="14" height="14" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2.5"><polygon points="5 3 19 12 5 21 5 3"/></svg>
+                                Запустить Wizard
+                            </button>
+                            <button class="btn btn-ghost btn-sm" id="bsWizardResetBtn" onclick="BsWizard.reset()" style="display:none">
+                                <svg width="13" height="13" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2.5"><polyline points="23 4 23 10 17 10"/><path d="M20.49 15a9 9 0 1 1-.02-8.49"/></svg>
+                                Сброс
+                            </button>
+                        </div>
+                    </div>
+                    <div class="wizard-steps" id="bsWizardSteps"></div>
+                    <div class="wizard-body" id="bsWizardBody">
+                        <div style="color:var(--text-muted);font-size:var(--text-sm);padding:var(--space-4) 0">
+                            Нажмите «Запустить Wizard» — пошаговое восстановление с автопереходами
+                        </div>
+                    </div>
+                    <div class="wizard-log" id="bsWizardLog" style="display:none;margin-top:var(--space-4)"></div>
+                    <div class="wizard-poll-bar" id="bsWizardPollBar" style="display:none">
+                        <div class="wizard-poll-fill" id="bsWizardPollFill" style="width:0%"></div>
                     </div>
                 </div>
 
@@ -3822,6 +3813,349 @@
                 check: _startIfNeeded,
                 stop: _stop,
                 isActive: function() { return !!_timer; },
+            };
+        })();
+
+
+        // ══════════════════════════════════════════════════════════════
+        // BOOTSTRAP WIZARD
+        // Steps: check → recover → (grastate if seqno=-1) → bootstrap
+        //        → join node1 → await_synced node1 → join node2 → ... → done
+        // ══════════════════════════════════════════════════════════════
+        var BsWizard = (function() {
+            var _state = {
+                active: false,
+                aborted: false,
+                candidate: null,
+                candidateSeqno: -1,
+                nodes: [],           // all nodes from clusterData
+                joinQueue: [],       // non-candidate nodes to join
+                currentJoinIdx: 0,
+                pollTimer: null,
+                pollElapsed: 0,
+                logLines: [],
+                recoverResults: [],
+                needGrastate: false, // true when candidate seqno was -1 before recover
+            };
+
+            // Step definitions — dynamic, built at runtime
+            var _steps = [];
+            var _stepIdx = 0;
+            var _POLL_IV = 4000;    // ms between synced-check polls
+            var _SYNC_TIMEOUT = 300; // sec to wait for Synced
+
+            function _buildSteps(nodes, candidate) {
+                var joiners = nodes.filter(function(n){ return n.id !== candidate; });
+                var s = [
+                    { id: 'check',     label: 'Pre-flight', desc: 'Проверка: MariaDB остановлена на всех нодах' },
+                    { id: 'recover',   label: 'wsrep-recover', desc: 'mysqld --wsrep-recover на всех нодах' },
+                    { id: 'grastate',  label: 'grastate',   desc: 'safe_to_bootstrap=1 на кандидате' },
+                    { id: 'bootstrap', label: 'Bootstrap',  desc: 'galera_new_cluster на кандидате' },
+                ];
+                joiners.forEach(function(n, i) {
+                    s.push({ id: 'join_' + n.id,    label: 'Join ' + (n.name||n.id), desc: 'Start mariadb на ' + (n.name||n.id) });
+                    s.push({ id: 'synced_' + n.id,  label: 'Synced ' + (n.name||n.id), desc: 'Ожидание Synced: ' + (n.name||n.id) });
+                });
+                return s;
+            }
+
+            function _log(msg, cls) {
+                cls = cls || 'wl-info';
+                var ts = new Date().toLocaleTimeString('ru-RU');
+                _state.logLines.push('<span class="' + cls + '">[' + ts + '] ' + msg + '</span>');
+                var el = document.getElementById('bsWizardLog');
+                if (el) { el.style.display = 'block'; el.innerHTML = _state.logLines.join('<br>'); el.scrollTop = el.scrollHeight; }
+            }
+
+            function _renderSteps() {
+                var el = document.getElementById('bsWizardSteps');
+                if (!el) return;
+                el.innerHTML = _steps.map(function(s, i) {
+                    var cls = i < _stepIdx ? 'done' : (i === _stepIdx ? 'active' : '');
+                    return '<div class="wizard-step ' + cls + '">' +
+                        '<div class="wizard-step-num">' + (i < _stepIdx ? '✓' : (i + 1)) + '</div>' +
+                        '<div class="wizard-step-label">' + s.label + '</div>' +
+                        '</div>';
+                }).join('');
+            }
+
+            function _renderBody(bodyHtml) {
+                var el = document.getElementById('bsWizardBody');
+                if (el) el.innerHTML = bodyHtml;
+            }
+
+            function _pollBar(show, pct) {
+                var bar = document.getElementById('bsWizardPollBar');
+                var fill = document.getElementById('bsWizardPollFill');
+                if (bar) bar.style.display = show ? 'block' : 'none';
+                if (fill) fill.style.width = (pct || 0) + '%';
+            }
+
+            function _setStartBtn(show) {
+                var btn = document.getElementById('bsWizardStartBtn');
+                if (btn) btn.style.display = show ? '' : 'none';
+                var rbtn = document.getElementById('bsWizardResetBtn');
+                if (rbtn) rbtn.style.display = show ? 'none' : 'inline-flex';
+            }
+
+            function _callWizard(step, extra) {
+                var apiBase = getApiBase();
+                var payload = Object.assign({ step: step, candidate: _state.candidate || '' }, extra || {});
+                return fetch(apiBase + '/api/bootstrap/wizard', {
+                    method: 'POST',
+                    headers: { 'Content-Type': 'application/json' },
+                    body: JSON.stringify(payload),
+                }).then(function(r) { return r.json(); });
+            }
+
+            function _done() {
+                _state.active = false;
+                _pollBar(false, 0);
+                _renderSteps();
+                _renderBody(
+                    '<div style="text-align:center;padding:var(--space-8) 0">' +
+                    '<div style="font-size:2.2rem;margin-bottom:var(--space-3)">✅</div>' +
+                    '<div style="font-size:var(--text-lg);font-weight:700;color:var(--color-success);margin-bottom:var(--space-2)">Bootstrap завершён успешно</div>' +
+                    '<div style="font-size:var(--text-sm);color:var(--text-muted);margin-bottom:var(--space-5)">Все ноды синхронизированы. Кластер <strong>' + (_state.candidate || '') + '</strong> → Primary.</div>' +
+                    '<button class="btn btn-primary" onclick="BsWizard.reset()">Новый Bootstrap</button>' +
+                    '</div>'
+                );
+                _log('Bootstrap Wizard завершён — кластер восстановлен ✓', 'wl-ok');
+                addLog('INFO', 'Bootstrap Wizard: кластер восстановлен, все ноды Synced');
+                toast('success', 'Bootstrap завершён ✓ — кластер восстановлен');
+                setTimeout(fetchRealData, 1500);
+            }
+
+            function _abort(msg) {
+                _state.active = false; _state.aborted = true;
+                if (_state.pollTimer) { clearInterval(_state.pollTimer); _state.pollTimer = null; }
+                _pollBar(false, 0);
+                _log('ABORT: ' + msg, 'wl-err');
+                _renderBody(
+                    '<div style="padding:var(--space-4);background:color-mix(in oklch,var(--color-error) 8%,var(--color-surface));border:1px solid color-mix(in oklch,var(--color-error) 30%,transparent);border-radius:var(--radius-md)">' +
+                    '<div style="font-weight:700;color:var(--color-error);margin-bottom:var(--space-2)">⛔ Ошибка на шаге ' + (_stepIdx + 1) + ': ' + (_steps[_stepIdx] ? _steps[_stepIdx].label : '?') + '</div>' +
+                    '<div style="font-size:var(--text-sm);color:var(--text-muted);margin-bottom:var(--space-4)">' + msg + '</div>' +
+                    '<button class="btn btn-primary" onclick="BsWizard.reset()">Начать заново</button>' +
+                    '</div>'
+                );
+            }
+
+            // ── STEP RUNNERS ──────────────────────────────────────────
+            function _runCheck() {
+                _log('→ Pre-flight: проверка что MariaDB остановлена...', 'wl-wait');
+                _renderBody('<div style="padding:var(--space-4);color:var(--text-muted)">&#x23F3; Проверка состояния MariaDB на всех нодах...</div>');
+                _callWizard('check').then(function(res) {
+                    if (!res.ok) { _abort(res.message || res.detail || 'pre-flight failed'); return; }
+                    _log('✓ Pre-flight OK', 'wl-ok');
+                    _stepIdx++; _runRecover();
+                }).catch(function(e) { _abort('Fetch error: ' + e.message); });
+            }
+
+            function _runRecover() {
+                _renderSteps();
+                _log('→ wsrep-recover на всех нодах параллельно...', 'wl-wait');
+                _pollBar(true, 5);
+                _renderBody('<div style="padding:var(--space-4);color:var(--text-muted)">&#x23F3; mysqld --wsrep-recover... (может занять до 90 сек)</div>');
+                _callWizard('recover').then(function(res) {
+                    _pollBar(false, 0);
+                    if (!res.ok && !res.results) { _abort(res.message || 'recover failed'); return; }
+
+                    // Show per-node recover results
+                    var rows = (res.results || []).map(function(r) {
+                        var isBest = r.node_id === res.candidate;
+                        return '<tr>' +
+                            '<td style="padding:4px 10px;font-weight:' + (isBest?'700':'400') + '">' + (r.name||r.node_id) + (isBest?' ★':'') + '</td>' +
+                            '<td style="padding:4px 10px;font-family:monospace;color:' + (r.ok?'var(--color-success)':'var(--color-error)') + '">' + (r.ok ? r.seqno : 'ERR') + '</td>' +
+                            '</tr>';
+                    }).join('');
+                    _log('✓ wsrep-recover done. Кандидат: ' + res.candidate + ' seqno=' + res.candidate_seqno, 'wl-ok');
+
+                    // Auto-select candidate
+                    _state.candidate = res.candidate || _state.candidate;
+                    _state.candidateSeqno = res.candidate_seqno;
+
+                    // Show candidate confirm with table
+                    _renderBody(
+                        '<div style="margin-bottom:var(--space-4)">' +
+                        '<div style="font-size:var(--text-sm);color:var(--text-muted);margin-bottom:var(--space-3)">Результаты wsrep-recover:</div>' +
+                        '<div style="overflow-x:auto"><table style="width:100%;margin-bottom:var(--space-4)">' +
+                        '<thead><tr><th style="padding:4px 10px;text-align:left;font-size:0.75rem;color:var(--text-muted);border-bottom:1px solid var(--color-border)">Нода</th>' +
+                        '<th style="padding:4px 10px;text-align:left;font-size:0.75rem;color:var(--text-muted);border-bottom:1px solid var(--color-border)">seqno</th></tr></thead>' +
+                        '<tbody>' + rows + '</tbody></table></div>' +
+                        '<div style="padding:var(--space-3);background:color-mix(in oklch,var(--color-success) 8%,var(--color-surface));border-radius:var(--radius-md);margin-bottom:var(--space-4)">' +
+                        '<strong>Авто-кандидат:</strong> ' + res.candidate + ' (seqno=' + res.candidate_seqno + ')' +
+                        '</div>' +
+                        '<div class="wizard-action-row">' +
+                        '<button class="btn btn-warning btn-lg" onclick="BsWizard._confirmCandidate()">' +
+                        '<svg width="16" height="16" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2.5"><polyline points="20 6 9 17 4 12"/></svg>' +
+                        ' Подтвердить и продолжить</button>' +
+                        '<button class="btn btn-ghost btn-sm" style="margin-left:auto;color:var(--color-error)" onclick="BsWizard._abortUser()">Отмена</button>' +
+                        '</div></div>'
+                    );
+                    _stepIdx++;
+                    _renderSteps();
+                }).catch(function(e) { _pollBar(false,0); _abort('Fetch error: ' + e.message); });
+            }
+
+            function _confirmCandidate() {
+                _runGrastate();
+            }
+
+            function _runGrastate() {
+                _renderSteps();
+                _log('→ grastate.dat safe_to_bootstrap=1 на ' + _state.candidate, 'wl-wait');
+                _renderBody('<div style="padding:var(--space-4);color:var(--text-muted)">&#x23F3; Устанавливаем safe_to_bootstrap=1 в grastate.dat...</div>');
+                _callWizard('grastate', { candidate: _state.candidate }).then(function(res) {
+                    if (!res.ok) { _abort(res.message || 'grastate failed'); return; }
+                    _log('✓ grastate.dat обновлён', 'wl-ok');
+                    _stepIdx++; _runBootstrap();
+                }).catch(function(e) { _abort('Fetch error: ' + e.message); });
+            }
+
+            function _runBootstrap() {
+                _renderSteps();
+                _log('→ galera_new_cluster на ' + _state.candidate, 'wl-wait');
+                _pollBar(true, 10);
+                _renderBody('<div style="padding:var(--space-4);color:var(--text-muted)">&#x23F3; Запуск galera_new_cluster на <strong>' + _state.candidate + '</strong>...</div>');
+                _callWizard('bootstrap', { candidate: _state.candidate }).then(function(res) {
+                    _pollBar(false, 0);
+                    if (!res.ok) { _abort(res.message || 'bootstrap failed'); return; }
+                    _log('✓ Primary cluster запущен на ' + _state.candidate, 'wl-ok');
+                    _stepIdx++; _runNextJoin();
+                }).catch(function(e) { _pollBar(false,0); _abort('Fetch error: ' + e.message); });
+            }
+
+            function _runNextJoin() {
+                if (_state.currentJoinIdx >= _state.joinQueue.length) {
+                    _stepIdx = _steps.length; // all done
+                    _done(); return;
+                }
+                var nodeId = _state.joinQueue[_state.currentJoinIdx];
+                _renderSteps();
+                _log('→ Start MariaDB на ' + nodeId, 'wl-wait');
+                _renderBody('<div style="padding:var(--space-4);color:var(--text-muted)">&#x23F3; systemctl start mariadb на <strong>' + nodeId + '</strong>...</div>');
+                _callWizard('join', { node_id: nodeId }).then(function(res) {
+                    if (!res.ok) { _abort(res.message || 'join ' + nodeId + ' failed'); return; }
+                    _log('✓ mariadb запущена на ' + nodeId, 'wl-ok');
+                    _stepIdx++; _runAwaitSynced(nodeId);
+                }).catch(function(e) { _abort('Fetch error: ' + e.message); });
+            }
+
+            function _runAwaitSynced(nodeId) {
+                _renderSteps();
+                _log('Ожидаем Synced на ' + nodeId + ' (макс ' + _SYNC_TIMEOUT + 'с)...', 'wl-wait');
+                _pollBar(true, 0);
+                _state.pollElapsed = 0;
+                _renderBody(
+                    '<div style="padding:var(--space-4)">' +
+                    '<div style="font-size:var(--text-sm);color:var(--text-muted);margin-bottom:var(--space-3)">&#x23F3; Ожидаем <code>wsrep_local_state_comment = Synced</code> на <strong>' + nodeId + '</strong></div>' +
+                    '<div style="font-size:var(--text-xs);color:var(--text-muted)">Нода присоединяется к кластеру через IST/SST. Это может занять несколько минут.</div>' +
+                    '</div>'
+                );
+
+                if (_state.pollTimer) clearInterval(_state.pollTimer);
+                _state.pollTimer = setInterval(function() {
+                    if (_state.aborted) { clearInterval(_state.pollTimer); return; }
+                    _state.pollElapsed += _POLL_IV / 1000;
+                    _pollBar(true, Math.min((_state.pollElapsed / _SYNC_TIMEOUT) * 100, 97));
+
+                    _callWizard('await_synced', { node_id: nodeId }).then(function(res) {
+                        if (res.state === 'Synced') {
+                            clearInterval(_state.pollTimer); _state.pollTimer = null;
+                            _pollBar(true, 100);
+                            setTimeout(function() { _pollBar(false, 0); }, 600);
+                            _log('✓ ' + nodeId + ': Synced ✓', 'wl-ok');
+                            _stepIdx++;
+                            _state.currentJoinIdx++;
+                            _runNextJoin();
+                        } else if (_state.pollElapsed >= _SYNC_TIMEOUT) {
+                            clearInterval(_state.pollTimer); _state.pollTimer = null;
+                            _pollBar(false, 0);
+                            _log('TIMEOUT: ' + nodeId + ' не Synced за ' + _SYNC_TIMEOUT + 'с. State=' + res.state, 'wl-err');
+                            _renderBody(
+                                '<div style="padding:var(--space-4)">' +
+                                '<div style="font-weight:700;color:var(--color-warning);margin-bottom:var(--space-2)">⚠ Timeout: ' + nodeId + ' не Synced</div>' +
+                                '<div style="font-size:var(--text-sm);color:var(--text-muted);margin-bottom:var(--space-4)">Текущее состояние: <strong>' + res.state + '</strong>. Проверьте ноду вручную или продолжите ожидание.</div>' +
+                                '<div class="wizard-action-row">' +
+                                '<button class="btn btn-primary" onclick="BsWizard._continueAfterTimeout(\'' + nodeId + '\')">Продолжить (перейти к следующей ноде)</button>' +
+                                '<button class="btn btn-ghost btn-sm" onclick="BsWizard._retrySync(\'' + nodeId + '\')">Повторить ожидание</button>' +
+                                '</div></div>'
+                            );
+                        } else {
+                            _log(nodeId + ': state=' + (res.state||'?') + ' (' + Math.round(_state.pollElapsed) + 'с)', 'wl-info');
+                        }
+                    }).catch(function() {});
+                }, _POLL_IV);
+            }
+
+            // ── PUBLIC API ────────────────────────────────────────────
+            return {
+                start: function() {
+                    var nodes = clusterData.nodes || [];
+                    if (!nodes.length) { toast('warning', 'Нет нод в конфигурации'); return; }
+
+                    confirm('⚠', 'Запустить Bootstrap Wizard?',
+                        'Wizard проведёт через полное восстановление кластера:\n' +
+                        '1. Pre-flight проверка\n' +
+                        '2. wsrep-recover на всех нодах\n' +
+                        '3. safe_to_bootstrap=1 на кандидате\n' +
+                        '4. galera_new_cluster\n' +
+                        '5. Запуск и ожидание Synced для каждой ноды\n\n' +
+                        '⚠ Все ноды должны быть ОСТАНОВЛЕНЫ перед запуском!',
+                        'btn-warning').then(function(ok) {
+                        if (!ok) return;
+
+                        // Reset state
+                        _state.active = true; _state.aborted = false;
+                        _state.candidate = null; _state.candidateSeqno = -1;
+                        _state.nodes = nodes;
+                        _state.joinQueue = nodes.map(function(n) { return n.id; }); // will filter after recover
+                        _state.currentJoinIdx = 0;
+                        _state.logLines = []; _state.recoverResults = [];
+                        _state.pollTimer = null; _state.pollElapsed = 0;
+                        _stepIdx = 0;
+
+                        // Build steps placeholder (will show all for progress)
+                        _steps = _buildSteps(nodes, nodes[0] && nodes[0].id);
+
+                        var logEl = document.getElementById('bsWizardLog');
+                        if (logEl) { logEl.style.display = 'none'; logEl.innerHTML = ''; }
+                        _pollBar(false, 0);
+                        _setStartBtn(false);
+                        _renderSteps();
+                        _log('Bootstrap Wizard запущен', 'wl-info');
+                        addLog('WARN', 'Bootstrap Wizard: запуск');
+                        _runCheck();
+                    });
+                },
+
+                reset: function() {
+                    if (_state.pollTimer) { clearInterval(_state.pollTimer); _state.pollTimer = null; }
+                    _state = {
+                        active: false, aborted: false, candidate: null, candidateSeqno: -1,
+                        nodes: [], joinQueue: [], currentJoinIdx: 0,
+                        pollTimer: null, pollElapsed: 0, logLines: [], recoverResults: [], needGrastate: false,
+                    };
+                    _steps = []; _stepIdx = 0;
+                    var logEl = document.getElementById('bsWizardLog');
+                    if (logEl) { logEl.style.display = 'none'; logEl.innerHTML = ''; }
+                    _pollBar(false, 0);
+                    _setStartBtn(true);
+                    var stepsEl = document.getElementById('bsWizardSteps');
+                    if (stepsEl) stepsEl.innerHTML = '';
+                    var bodyEl = document.getElementById('bsWizardBody');
+                    if (bodyEl) bodyEl.innerHTML = '<div style="color:var(--text-muted);font-size:var(--text-sm);padding:var(--space-4) 0">Нажмите «Запустить Wizard» — пошаговое восстановление с автопереходами</div>';
+                },
+
+                // internal hooks called from inline onclick in rendered HTML
+                _confirmCandidate: _confirmCandidate,
+                _abortUser: function() { _abort('Отменено пользователем'); },
+                _continueAfterTimeout: function(nodeId) {
+                    _stepIdx++; _state.currentJoinIdx++; _runNextJoin();
+                },
+                _retrySync: function(nodeId) {
+                    _runAwaitSynced(nodeId);
+                },
             };
         })();
 

@@ -1494,6 +1494,205 @@ async def do_bootstrap(payload: BootstrapPayload):
 
     return {"ok": True, "mock": False, "steps": steps}
 
+
+# ── BOOTSTRAP WIZARD — step executor ─────────────────────────
+class BootstrapWizardPayload(BaseModel):
+    step: str
+    candidate: str = ""
+    node_id: str = ""
+    nodes_order: list[str] = []
+
+@app.post("/api/bootstrap/wizard")
+async def bootstrap_wizard_step(payload: BootstrapWizardPayload):
+    """Execute one Bootstrap Wizard step.
+    Steps: check | recover | grastate | bootstrap | join | await_synced
+    """
+    cfg      = load_config()
+    use_mock = cfg.get("settings", {}).get("use_mock", True)
+    nodes    = cfg.get("nodes", [])
+    step     = payload.step
+
+    def _get_node(nid):
+        n = next((n for n in nodes if n["id"] == nid), None)
+        if not n:
+            raise HTTPException(404, f"Node '{nid}' not found")
+        return n
+
+    if use_mock:
+        import random as _r, time as _t
+        _t.sleep(0.25)
+        if step == "check":
+            return {"ok": True, "mock": True, "step": step,
+                    "message": "[mock] Pre-flight OK: mariadb stopped on all nodes"}
+        if step == "recover":
+            base = 500000 + _r.randint(0, 500)
+            results = []
+            for n in nodes:
+                seqno = base + 120 if n["id"] == payload.candidate else base + _r.randint(0, 80)
+                results.append({"node_id": n["id"], "name": n.get("name", n["id"]),
+                                "seqno": seqno, "ok": True, "uuid": "5a7b1c2d-dead-beef-cafe-0123456789ab"})
+            best = max(results, key=lambda r: r["seqno"])
+            return {"ok": True, "mock": True, "step": step,
+                    "results": results,
+                    "candidate": best["node_id"], "candidate_seqno": best["seqno"],
+                    "message": f"[mock] wsrep-recover-all. Candidate: {best['node_id']} seqno={best['seqno']}"}
+        if step == "grastate":
+            return {"ok": True, "mock": True, "step": step,
+                    "message": f"[mock] grastate.dat safe_to_bootstrap=1 set on {payload.candidate}"}
+        if step == "bootstrap":
+            return {"ok": True, "mock": True, "step": step,
+                    "message": f"[mock] galera_new_cluster on {payload.candidate} — Primary started"}
+        if step == "join":
+            return {"ok": True, "mock": True, "step": step, "node_id": payload.node_id,
+                    "message": f"[mock] systemctl start mariadb on {payload.node_id} — OK"}
+        if step == "await_synced":
+            return {"ok": True, "mock": True, "step": step, "node_id": payload.node_id,
+                    "state": "Synced", "message": f"[mock] {payload.node_id}: Synced ✓"}
+        raise HTTPException(400, f"Unknown wizard step: {step}")
+
+    # Real SSH mode
+    try:
+        import paramiko, re as _re
+    except ImportError:
+        raise HTTPException(500, "paramiko not installed")
+
+    def _ssh(node, *cmds, timeout=30):
+        client = paramiko.SSHClient()
+        client.set_missing_host_key_policy(paramiko.AutoAddPolicy())
+        client.connect(
+            node.get("host"), port=int(node.get("ssh_port", 22)),
+            username=node.get("ssh_user", "root"),
+            key_filename=str(Path(node.get("ssh_key", "~/.ssh/id_rsa")).expanduser()),
+            timeout=10,
+        )
+        results = []
+        try:
+            for cmd in cmds:
+                _, so, se = client.exec_command(cmd, timeout=timeout)
+                out = so.read().decode(errors="replace").strip()
+                err = se.read().decode(errors="replace").strip()
+                ec  = so.channel.recv_exit_status()
+                results.append((ec, out, err))
+        finally:
+            client.close()
+        return results
+
+    # ── check ────────────────────────────────────────────────
+    if step == "check":
+        active = []
+        for node in nodes:
+            try:
+                [(ec, state, _)] = _ssh(node, "systemctl is-active mariadb.service", timeout=8)
+                if state.strip() == "active":
+                    active.append(node["id"])
+            except Exception as e:
+                return {"ok": False, "step": step,
+                        "message": f"SSH failed on {node['id']}: {e}"}
+        if active:
+            return {"ok": False, "step": step,
+                    "message": "Bootstrap blocked: stop mariadb on: " + ", ".join(active)}
+        _push_event("info", "Bootstrap Wizard pre-flight OK", "bootstrap")
+        return {"ok": True, "step": step,
+                "message": "Pre-flight OK: mariadb.service stopped on all nodes"}
+
+    # ── recover ──────────────────────────────────────────────
+    if step == "recover":
+        import concurrent.futures
+        def _recover_one(node):
+            nid = node["id"]
+            try:
+                [(ec, out, _)] = _ssh(node,
+                                      "mysqld --wsrep-recover 2>&1 | grep -E 'Recovered position|WSREP: Recovered' | tail -1",
+                                      timeout=90)
+                m = _re.search(r'Recovered position.*?([0-9a-f-]{36}):(-?\d+)', out, _re.IGNORECASE)
+                if m:
+                    return {"node_id": nid, "name": node.get("name", nid),
+                            "ok": True, "seqno": int(m.group(2)), "uuid": m.group(1)}
+            except Exception as e:
+                return {"node_id": nid, "name": node.get("name", nid),
+                        "ok": False, "seqno": -1, "uuid": "unknown", "error": str(e)}
+            return {"node_id": nid, "name": node.get("name", nid),
+                    "ok": False, "seqno": -1, "uuid": "unknown"}
+
+        with concurrent.futures.ThreadPoolExecutor(max_workers=min(len(nodes), 8)) as pool:
+            results = list(pool.map(_recover_one, nodes))
+
+        ok_r = [r for r in results if r.get("ok") and r["seqno"] >= 0]
+        best = max(ok_r, key=lambda r: r["seqno"]) if ok_r else None
+        _push_event("info",
+                    f"Bootstrap Wizard recover: candidate={best['node_id'] if best else 'none'}", "bootstrap")
+        return {"ok": bool(best), "step": step, "results": results,
+                "candidate": best["node_id"] if best else None,
+                "candidate_seqno": best["seqno"] if best else -1,
+                "message": (f"Candidate: {best['node_id']} seqno={best['seqno']}" if best
+                            else "No node returned valid seqno")}
+
+    # ── grastate ─────────────────────────────────────────────
+    if step == "grastate":
+        node = _get_node(payload.candidate)
+        cmd = ("sed -i 's/^safe_to_bootstrap:.*/safe_to_bootstrap: 1/' "
+               "/var/lib/mysql/grastate.dat")
+        try:
+            [(ec, out, err)] = _ssh(node, cmd, timeout=15)
+            if ec != 0:
+                return {"ok": False, "step": step,
+                        "message": f"sed failed (exit {ec}): {err}"}
+        except Exception as e:
+            return {"ok": False, "step": step, "message": str(e)}
+        _push_event("warn",
+                    f"Bootstrap Wizard: safe_to_bootstrap=1 set on {payload.candidate}", "bootstrap")
+        return {"ok": True, "step": step,
+                "message": f"grastate.dat updated on {payload.candidate}"}
+
+    # ── bootstrap ────────────────────────────────────────────
+    if step == "bootstrap":
+        node = _get_node(payload.candidate)
+        try:
+            [(ec, out, err)] = _ssh(node, "galera_new_cluster", timeout=60)
+            if ec != 0:
+                return {"ok": False, "step": step,
+                        "message": f"galera_new_cluster failed (exit {ec}): {err}"}
+        except Exception as e:
+            return {"ok": False, "step": step, "message": str(e)}
+        _push_event("info",
+                    f"Bootstrap Wizard: galera_new_cluster on {payload.candidate}", "bootstrap")
+        return {"ok": True, "step": step,
+                "message": f"galera_new_cluster on {payload.candidate} — Primary cluster started"}
+
+    # ── join ─────────────────────────────────────────────────
+    if step == "join":
+        node = _get_node(payload.node_id)
+        try:
+            [(ec, out, err)] = _ssh(node, "systemctl start mariadb.service", timeout=30)
+        except Exception as e:
+            return {"ok": False, "step": step, "node_id": payload.node_id, "message": str(e)}
+        _push_event("info",
+                    f"Bootstrap Wizard: started mariadb on {payload.node_id} exit={ec}", "bootstrap")
+        return {"ok": ec == 0, "step": step, "node_id": payload.node_id,
+                "message": f"systemctl start mariadb on {payload.node_id} exit={ec}" + (f": {err}" if err else "")}
+
+    # ── await_synced ─────────────────────────────────────────
+    if step == "await_synced":
+        node = _get_node(payload.node_id)
+        cmd = ("mysql -N -B -e \"SELECT VARIABLE_VALUE FROM information_schema.GLOBAL_STATUS "
+               "WHERE VARIABLE_NAME='WSREP_LOCAL_STATE_COMMENT'\" 2>/dev/null || "
+               "mysql -N -B -e \"show global status like 'wsrep_local_state_comment'\" 2>/dev/null | awk '{print $2}'")
+        try:
+            [(ec, out, err)] = _ssh(node, cmd, timeout=15)
+            state = out.strip() or "unknown"
+        except Exception as e:
+            return {"ok": False, "step": step, "node_id": payload.node_id,
+                    "state": "error", "message": str(e)}
+        synced = state == "Synced"
+        if synced:
+            _push_event("info",
+                        f"Bootstrap Wizard: {payload.node_id} Synced", "bootstrap")
+        return {"ok": synced, "step": step, "node_id": payload.node_id,
+                "state": state,
+                "message": f"{payload.node_id}: wsrep_local_state_comment = {state}"}
+
+    raise HTTPException(400, f"Unknown wizard step: '{step}'")
+
 # ── REJOIN ───────────────────────────────────────────────────
 class RejoinPayload(BaseModel):
     node_id: str

@@ -1063,3 +1063,9 @@ async def diagnostics_system_health():
 async def sst_status_2(node_id: str):
     """Alias for /api/node/{node_id}/sst-status (duplicate kept for backwards compat)."""
     return await sst_status(node_id)
+
+
+# ── ENTRYPOINT ────────────────────────────────────────────────
+if __name__ == "__main__":
+    import uvicorn
+    uvicorn.run("main:app", host="0.0.0.0", port=8000, reload=True)

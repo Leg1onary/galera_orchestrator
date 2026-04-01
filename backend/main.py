@@ -53,9 +53,8 @@ def _push_event(level: str, message: str, source: str = "system"):
     try:
         mgr = globals().get("_ws_manager")
         if mgr is not None:
-            loop = asyncio.get_event_loop()
-            if loop.is_running():
-                asyncio.ensure_future(mgr.broadcast({"type": "event", **entry}))
+            loop = asyncio.get_running_loop()
+            loop.create_task(mgr.broadcast({"type": "event", **entry}))
     except Exception:
         pass
 
@@ -1206,6 +1205,7 @@ async def do_bootstrap(payload: BootstrapPayload):
         raise HTTPException(500, "paramiko not installed")
 
     steps = []
+
     def ssh_run(node, cmd):
         client = paramiko.SSHClient()
         client.set_missing_host_key_policy(paramiko.AutoAddPolicy())
@@ -1213,27 +1213,56 @@ async def do_bootstrap(payload: BootstrapPayload):
                        username=node.get("ssh_user","root"),
                        key_filename=str(Path(node.get("ssh_key","~/.ssh/id_rsa")).expanduser()),
                        timeout=10)
-        _, so, se = client.exec_command(cmd, timeout=30)
-        out = so.read().decode(errors="replace").strip()
-        err = se.read().decode(errors="replace").strip()
-        ec  = so.channel.recv_exit_status()
-        client.close()
-        return ec, out, err
+        try:
+            _, so, se = client.exec_command(cmd, timeout=30)
+            out = so.read().decode(errors="replace").strip()
+            err = se.read().decode(errors="replace").strip()
+            ec  = so.channel.recv_exit_status()
+            return ec, out, err
+        finally:
+            client.close()
 
-    # Step 1: galera_new_cluster on candidate
+    def ssh_service_state(node):
+        ec, out, err = ssh_run(node, "systemctl is-active mariadb.service")
+        state = (out or err or "unknown").strip()
+        return ec, state
+
+    active_nodes = []
+    for node in nodes:
+        if node["id"] == payload.candidate:
+            continue
+        try:
+            _, state = ssh_service_state(node)
+            if state == "active":
+                active_nodes.append(node["id"])
+        except Exception as e:
+            steps.append({"step":1,"status":"error","message":f"systemd check failed on {node['id']}: {e}"})
+            return {"ok": False, "mock": False, "steps": steps}
+
+    if active_nodes:
+        steps.append({
+            "step": 1,
+            "status": "error",
+            "message": "Bootstrap blocked: stop mariadb.service on non-candidate nodes first: " + ", ".join(active_nodes)
+        })
+        return {"ok": False, "mock": False, "steps": steps}
+
+    steps.append({"step":1,"status":"ok","message":"Pre-bootstrap systemd check passed: mariadb.service is stopped on all non-candidate nodes"})
+
+    # Step 2: galera_new_cluster on candidate
     try:
         ec, out, err = ssh_run(candidate, "galera_new_cluster")
         if ec != 0:
             raise Exception(err or f"exit_code={ec}")
-        steps.append({"step":1,"status":"ok",
+        steps.append({"step":2,"status":"ok",
                       "message":f"galera_new_cluster на {payload.candidate} — OK"})
     except Exception as e:
-        steps.append({"step":1,"status":"error","message":f"galera_new_cluster failed: {e}"})
+        steps.append({"step":2,"status":"error","message":f"galera_new_cluster failed: {e}"})
         return {"ok": False, "mock": False, "steps": steps}
 
-    # Step 2: start other nodes
+    # Step 3: start other nodes
     joiners = [n for n in nodes if n["id"] != payload.candidate]
-    for i, n in enumerate(joiners, 2):
+    for i, n in enumerate(joiners, 3):
         try:
             ec, out, err = ssh_run(n, "systemctl start mariadb.service")
             steps.append({"step":i,"status":"ok",

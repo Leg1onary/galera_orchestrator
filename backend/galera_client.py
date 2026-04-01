@@ -28,6 +28,9 @@ WSREP_VARS = [
     "wsrep_apply_oooe",
     "wsrep_cluster_conf_id",
     "wsrep_cluster_state_uuid",
+    "wsrep_incoming_addresses",
+    "wsrep_gcomm_uuid",
+    "wsrep_protocol_version",
 ]
 
 

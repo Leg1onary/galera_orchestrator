@@ -4275,6 +4275,7 @@
                 },
             };
         })();
+        window.BsWizard = BsWizard;
 
         window.App = {
             go: function(page) {
@@ -5667,11 +5668,28 @@
                 .catch(function() {});
         })();
 
+
+        // ── Sprint A: bridge internals to global scope for inline onclick + Diag module ──
+        window.BsWizard      = BsWizard;
+        window.maintInitNode = maintInitNode;
+        window._diagBridge   = {
+            get clusterData()  { return clusterData; },
+            set clusterData(v) { clusterData = v; },
+            getApiBase: getApiBase,
+            toast:      toast,
+            addLog:     addLog
+        };
     })();
 
     // ═══════════════════════════════════════════════════
     // DIAG — C4/C5/C6 Diagnostics Module
     // ═══════════════════════════════════════════════════
+    // ── Sprint A: Diag bridge helpers (Diag is outside main IIFE) ──
+    function _bd_clusterData()  { return window._diagBridge ? window._diagBridge.clusterData : { nodes: [], arbitrators: [] }; }
+    function _bd_getApiBase()   { return window._diagBridge ? window._diagBridge.getApiBase() : (window.location.protocol + "//" + window.location.host); }
+    function _bd_toast(t, m)    { if (window._diagBridge) window._diagBridge.toast(t, m); }
+    function _bd_addLog(l, m)   { if (window._diagBridge) window._diagBridge.addLog(l, m); }
+
     var Diag = {
 
         // ─── D5: CHECK ALL ─────────────────────────────────────
@@ -5682,8 +5700,8 @@
             container.innerHTML = '<div style="padding:var(--space-6);text-align:center;color:var(--color-text-muted)">'
                 + '<div class="spin-dot" style="display:inline-block;margin-right:8px"></div>Параллельная проверка всех нод...</div>';
 
-            var apiBase = getApiBase();
-            var nodes = clusterData.nodes || [];
+            var apiBase = _bd_getApiBase();
+            var nodes = _bd_clusterData().nodes || [];
             if (nodes.length === 0) {
                 container.innerHTML = '<div style="padding:var(--space-6);color:var(--color-text-muted)">Нет нод в конфигурации</div>';
                 if (btn) { btn.disabled = false; btn.innerHTML = '<svg width="13" height="13" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2.5"><polyline points="23 4 23 10 17 10"/><path d="M20.49 15a9 9 0 1 1-.02-8.49"/></svg> Проверить всё'; }
@@ -5772,7 +5790,7 @@
         renderSeqnoDelta: function() {
             var container = document.getElementById('seqnoDeltaContainer');
             if (!container) return;
-            var nodes = (clusterData.nodes || []).filter(function(n) { return n && n.metrics; });
+            var nodes = (_bd_clusterData().nodes || []).filter(function(n) { return n && n.metrics; });
             if (nodes.length === 0) {
                 container.innerHTML = '<div style="padding:var(--space-6);text-align:center;color:var(--color-text-muted);font-size:var(--text-sm)">Нет данных мониторинга</div>';
                 return;
@@ -5817,7 +5835,7 @@
         renderWsrepQuick: function() {
             var container = document.getElementById('wsrepQuickContainer');
             if (!container) return;
-            var nodes = (clusterData.nodes || []).filter(function(n) { return n && n.metrics; });
+            var nodes = (_bd_clusterData().nodes || []).filter(function(n) { return n && n.metrics; });
             if (nodes.length === 0) {
                 container.innerHTML = '<div style="padding:var(--space-6);text-align:center;color:var(--color-text-muted);font-size:var(--text-sm)">Нет данных мониторинга</div>';
                 return;
@@ -5875,7 +5893,7 @@
 
 
         checkSystemHealth: function() {
-            var apiBase = getApiBase();
+            var apiBase = _bd_getApiBase();
             var container = document.getElementById('sysHealthContainer');
             var checked   = document.getElementById('sysHealthChecked');
             if (container) container.innerHTML = '<div style="padding:var(--space-6);text-align:center;color:var(--color-text-muted)">' +
@@ -5966,16 +5984,16 @@
             var nodeSel = document.getElementById('proclistNodeSelect');
             if (nodeSel) {
                 nodeSel.innerHTML = '<option value="">— выберите ноду —</option>';
-                clusterData.nodes.forEach(function(n) {
+                _bd_clusterData().nodes.forEach(function(n) {
                     nodeSel.innerHTML += '<option value="' + n.id + '">' + (n.name||n.id) + ' (' + (n.host||'') + ')</option>';
                 });
             }
             // Populate arbitrator select for garbd log
             var arbSel = document.getElementById('garbdArbSelect');
             if (arbSel) {
-                var arbs = clusterData.arbitrators && clusterData.arbitrators.length
-                    ? clusterData.arbitrators
-                    : (clusterData.arbitrator && clusterData.arbitrator.host ? [clusterData.arbitrator] : []);
+                var arbs = _bd_clusterData().arbitrators && _bd_clusterData().arbitrators.length
+                    ? _bd_clusterData().arbitrators
+                    : (_bd_clusterData().arbitrator && _bd_clusterData().arbitrator.host ? [_bd_clusterData().arbitrator] : []);
                 if (arbs.length > 0) {
                     arbSel.innerHTML = '';
                     arbs.forEach(function(a) {
@@ -5995,11 +6013,11 @@
         // C5: SHOW PROCESSLIST
         loadProcesslist: function() {
             var nodeId = document.getElementById('proclistNodeSelect').value;
-            if (!nodeId) { toast('warning', 'Выберите ноду'); return; }
+            if (!nodeId) { _bd_toast('warning', 'Выберите ноду'); return; }
             var container = document.getElementById('proclistContainer');
             container.innerHTML = '<div style="padding:var(--space-6);text-align:center;color:var(--color-text-muted)">'
                 + '<div class="spin-dot" style="display:inline-block;margin-right:8px"></div>Загрузка processlist...</div>';
-            var apiBase = getApiBase();
+            var apiBase = _bd_getApiBase();
             fetch(apiBase + '/api/node/' + nodeId + '/processlist')
                 .then(function(r) { return r.json(); })
                 .then(function(data) {
@@ -6060,7 +6078,7 @@
             confirm('⚠️', 'KILL QUERY ' + processId + '?',
                 'Принудительно завершить запрос #' + processId + ' на ноде ' + nodeId, 'btn-danger').then(function(ok) {
                 if (!ok) return;
-                var apiBase = getApiBase();
+                var apiBase = _bd_getApiBase();
                 fetch(apiBase + '/api/node/' + nodeId + '/kill-query', {
                     method: 'POST',
                     headers: {'Content-Type':'application/json'},
@@ -6069,26 +6087,26 @@
                     .then(function(r) { return r.json(); })
                     .then(function(data) {
                         if (data.ok) {
-                            toast('success', 'KILL QUERY ' + processId + ' выполнен');
-                            addLog('WARN', 'KILL QUERY ' + processId + ' на ноде ' + nodeId);
+                            _bd_toast('success', 'KILL QUERY ' + processId + ' выполнен');
+                            _bd_addLog('WARN', 'KILL QUERY ' + processId + ' на ноде ' + nodeId);
                             Diag.loadProcesslist();
                         } else {
-                            toast('error', 'Ошибка KILL QUERY');
+                            _bd_toast('error', 'Ошибка KILL QUERY');
                         }
                     })
-                    .catch(function(e) { toast('error', 'Ошибка: ' + e.message); });
+                    .catch(function(e) { _bd_toast('error', 'Ошибка: ' + e.message); });
             });
         },
 
         // C4: GARBD LOG
         loadGarbdLog: function() {
             var arbId = document.getElementById('garbdArbSelect').value;
-            if (!arbId) { toast('warning', 'Нет арбитраторов для диагностики'); return; }
+            if (!arbId) { _bd_toast('warning', 'Нет арбитраторов для диагностики'); return; }
             var lines = document.getElementById('garbdLinesSelect').value || 50;
             var container = document.getElementById('garbdLogContainer');
             container.innerHTML = '<div style="padding:var(--space-6);text-align:center;color:var(--color-text-muted)">'
                 + '<div class="spin-dot" style="display:inline-block;margin-right:8px"></div>Загрузка журнала garbd...</div>';
-            var apiBase = getApiBase();
+            var apiBase = _bd_getApiBase();
             fetch(apiBase + '/api/garbd/' + arbId + '/log?lines=' + lines)
                 .then(function(r) { return r.json(); })
                 .then(function(data) { Diag._renderGarbdLog(data); })
@@ -6128,7 +6146,7 @@
             var container = document.getElementById('cnfCompareContainer');
             container.innerHTML = '<div style="padding:var(--space-6);text-align:center;color:var(--color-text-muted)">'
                 + '<div class="spin-dot" style="display:inline-block;margin-right:8px"></div>SSH на все ноды, парсинг galera.cnf...</div>';
-            var apiBase = getApiBase();
+            var apiBase = _bd_getApiBase();
             fetch(apiBase + '/api/config/compare-galera-cnf')
                 .then(function(r) { return r.json(); })
                 .then(function(data) { Diag._renderCnfCompare(data); })
@@ -6215,7 +6233,7 @@
             if (!sel) return;
             // Populate node list
             sel.innerHTML = '<option value="">— выберите ноду —</option>';
-            clusterData.nodes.forEach(function(n) {
+            _bd_clusterData().nodes.forEach(function(n) {
                 var opt = document.createElement('option');
                 opt.value = n.id || n.name;
                 opt.textContent = n.name;

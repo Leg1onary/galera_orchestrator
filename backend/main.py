@@ -14,6 +14,38 @@ from config import load_config, save_config
 from galera_client import get_cluster_status
 from mock_data import set_scenario, get_scenario
 
+# ── Shared SSH helper ────────────────────────────────────────
+def ssh_run(node: dict, *cmds: str, timeout: int = 30) -> list:
+    """Open ONE SSH connection, run all cmds sequentially.
+
+    Returns list of (exit_code, stdout, stderr) tuples.
+    Raises ``paramiko.SSHException`` / ``socket.error`` on connection failure.
+    """
+    try:
+        import paramiko
+    except ImportError:
+        raise RuntimeError("paramiko not installed. Run: pip install paramiko")
+    client = paramiko.SSHClient()
+    client.set_missing_host_key_policy(paramiko.AutoAddPolicy())
+    client.connect(
+        node.get("host"), port=int(node.get("ssh_port", 22)),
+        username=node.get("ssh_user", "root"),
+        key_filename=str(Path(node.get("ssh_key", "~/.ssh/id_rsa")).expanduser()),
+        timeout=10,
+    )
+    results = []
+    try:
+        for cmd in cmds:
+            _, so, se = client.exec_command(cmd, timeout=timeout)
+            out = so.read().decode(errors="replace").strip()
+            err = se.read().decode(errors="replace").strip()
+            ec  = so.channel.recv_exit_status()
+            results.append((ec, out, err))
+    finally:
+        client.close()
+    return results
+
+
 # ── Persistent event log ─────────────────────────────────────────
 _LOG_DIR  = Path(__file__).parent.parent / "logs"
 _LOG_FILE = _LOG_DIR / "galera-events.log"
@@ -1426,40 +1458,26 @@ async def do_bootstrap(payload: BootstrapPayload):
 
     steps = []
 
-    def _ssh_node_run(node, *cmds, timeout=30):
-        """Open ONE SSH connection, run all cmds sequentially, return list of (ec, out, err)."""
-        client = paramiko.SSHClient()
-        client.set_missing_host_key_policy(paramiko.AutoAddPolicy())
-        client.connect(
-            node.get("host"), port=int(node.get("ssh_port", 22)),
-            username=node.get("ssh_user", "root"),
-            key_filename=str(Path(node.get("ssh_key", "~/.ssh/id_rsa")).expanduser()),
-            timeout=10,
-        )
-        results = []
-        try:
-            for cmd in cmds:
-                _, so, se = client.exec_command(cmd, timeout=timeout)
-                out = so.read().decode(errors="replace").strip()
-                err = se.read().decode(errors="replace").strip()
-                ec  = so.channel.recv_exit_status()
-                results.append((ec, out, err))
-        finally:
-            client.close()
-        return results
-
     # Step 1: pre-bootstrap systemd check — mariadb must be stopped on non-candidate nodes
+    # Run checks in parallel so N-node clusters don't incur N×SSH roundtrips
+    from concurrent.futures import ThreadPoolExecutor, as_completed as _as_completed
+    non_candidates = [n for n in nodes if n["id"] != payload.candidate]
+
+    def _systemd_check(node):
+        [(ec, state, _)] = ssh_run(node, "systemctl is-active mariadb.service", timeout=8)
+        return node["id"], state
+
     active_nodes = []
-    for node in nodes:
-        if node["id"] == payload.candidate:
-            continue
-        try:
-            [(ec, state, _)] = _ssh_node_run(node, "systemctl is-active mariadb.service", timeout=8)
-            if state == "active":
-                active_nodes.append(node["id"])
-        except Exception as e:
-            steps.append({"step": 1, "status": "error", "message": f"systemd check failed on {node['id']}: {e}"})
-            return {"ok": False, "mock": False, "steps": steps}
+    try:
+        with ThreadPoolExecutor(max_workers=len(non_candidates) or 1) as pool:
+            fmap = {pool.submit(_systemd_check, n): n["id"] for n in non_candidates}
+            for fut in _as_completed(fmap, timeout=15):
+                nid, state = fut.result()
+                if state == "active":
+                    active_nodes.append(nid)
+    except Exception as e:
+        steps.append({"step": 1, "status": "error", "message": f"systemd check failed: {e}"})
+        return {"ok": False, "mock": False, "steps": steps}
 
     if active_nodes:
         steps.append({
@@ -1473,7 +1491,7 @@ async def do_bootstrap(payload: BootstrapPayload):
 
     # Step 2: galera_new_cluster on candidate (single SSH session)
     try:
-        [(ec, out, err)] = _ssh_node_run(candidate, "galera_new_cluster", timeout=60)
+        [(ec, out, err)] = ssh_run(candidate, "galera_new_cluster", timeout=60)
         if ec != 0:
             raise Exception(err or f"exit_code={ec}")
         steps.append({"step": 2, "status": "ok",
@@ -1486,7 +1504,7 @@ async def do_bootstrap(payload: BootstrapPayload):
     joiners = [n for n in nodes if n["id"] != payload.candidate]
     for i, n in enumerate(joiners, 3):
         try:
-            [(ec, out, err)] = _ssh_node_run(n, "systemctl start mariadb.service", timeout=30)
+            [(ec, out, err)] = ssh_run(n, "systemctl start mariadb.service", timeout=30)
             steps.append({"step": i, "status": "ok",
                           "message": f"systemctl start mariadb на {n['id']} — exit={ec}"})
         except Exception as e:
@@ -1556,33 +1574,12 @@ async def bootstrap_wizard_step(payload: BootstrapWizardPayload):
     except ImportError:
         raise HTTPException(500, "paramiko not installed")
 
-    def _ssh(node, *cmds, timeout=30):
-        client = paramiko.SSHClient()
-        client.set_missing_host_key_policy(paramiko.AutoAddPolicy())
-        client.connect(
-            node.get("host"), port=int(node.get("ssh_port", 22)),
-            username=node.get("ssh_user", "root"),
-            key_filename=str(Path(node.get("ssh_key", "~/.ssh/id_rsa")).expanduser()),
-            timeout=10,
-        )
-        results = []
-        try:
-            for cmd in cmds:
-                _, so, se = client.exec_command(cmd, timeout=timeout)
-                out = so.read().decode(errors="replace").strip()
-                err = se.read().decode(errors="replace").strip()
-                ec  = so.channel.recv_exit_status()
-                results.append((ec, out, err))
-        finally:
-            client.close()
-        return results
-
     # ── check ────────────────────────────────────────────────
     if step == "check":
         active = []
         for node in nodes:
             try:
-                [(ec, state, _)] = _ssh(node, "systemctl is-active mariadb.service", timeout=8)
+                [(ec, state, _)] = ssh_run(node, "systemctl is-active mariadb.service", timeout=8)
                 if state.strip() == "active":
                     active.append(node["id"])
             except Exception as e:
@@ -1601,9 +1598,9 @@ async def bootstrap_wizard_step(payload: BootstrapWizardPayload):
         def _recover_one(node):
             nid = node["id"]
             try:
-                [(ec, out, _)] = _ssh(node,
-                                      "mysqld --wsrep-recover 2>&1 | grep -E 'Recovered position|WSREP: Recovered' | tail -1",
-                                      timeout=90)
+                [(ec, out, _)] = ssh_run(node,
+                                         "mysqld --wsrep-recover 2>&1 | grep -E 'Recovered position|WSREP: Recovered' | tail -1",
+                                         timeout=90)
                 m = _re.search(r'Recovered position.*?([0-9a-f-]{36}):(-?\d+)', out, _re.IGNORECASE)
                 if m:
                     return {"node_id": nid, "name": node.get("name", nid),
@@ -1633,7 +1630,7 @@ async def bootstrap_wizard_step(payload: BootstrapWizardPayload):
         cmd = ("sed -i 's/^safe_to_bootstrap:.*/safe_to_bootstrap: 1/' "
                "/var/lib/mysql/grastate.dat")
         try:
-            [(ec, out, err)] = _ssh(node, cmd, timeout=15)
+            [(ec, out, err)] = ssh_run(node, cmd, timeout=15)
             if ec != 0:
                 return {"ok": False, "step": step,
                         "message": f"sed failed (exit {ec}): {err}"}
@@ -1648,7 +1645,7 @@ async def bootstrap_wizard_step(payload: BootstrapWizardPayload):
     if step == "bootstrap":
         node = _get_node(payload.candidate)
         try:
-            [(ec, out, err)] = _ssh(node, "galera_new_cluster", timeout=60)
+            [(ec, out, err)] = ssh_run(node, "galera_new_cluster", timeout=60)
             if ec != 0:
                 return {"ok": False, "step": step,
                         "message": f"galera_new_cluster failed (exit {ec}): {err}"}
@@ -1663,7 +1660,7 @@ async def bootstrap_wizard_step(payload: BootstrapWizardPayload):
     if step == "join":
         node = _get_node(payload.node_id)
         try:
-            [(ec, out, err)] = _ssh(node, "systemctl start mariadb.service", timeout=30)
+            [(ec, out, err)] = ssh_run(node, "systemctl start mariadb.service", timeout=30)
         except Exception as e:
             return {"ok": False, "step": step, "node_id": payload.node_id, "message": str(e)}
         _push_event("info",
@@ -1678,7 +1675,7 @@ async def bootstrap_wizard_step(payload: BootstrapWizardPayload):
                "WHERE VARIABLE_NAME='WSREP_LOCAL_STATE_COMMENT'\" 2>/dev/null || "
                "mysql -N -B -e \"show global status like 'wsrep_local_state_comment'\" 2>/dev/null | awk '{print $2}'")
         try:
-            [(ec, out, err)] = _ssh(node, cmd, timeout=15)
+            [(ec, out, err)] = ssh_run(node, cmd, timeout=15)
             state = out.strip() or "unknown"
         except Exception as e:
             return {"ok": False, "step": step, "node_id": payload.node_id,

@@ -183,6 +183,11 @@ def _real_node_status(node: dict, cfg: dict) -> dict:
             "wsrep_cluster_state_uuid":     status.get("wsrep_cluster_state_uuid", ""),
             "read_only":                    read_only_val == "ON",
         })
+        # Dynamic pickup: add any WSREP_VARS not already mapped manually above
+        _already = set(base.keys())
+        for _var in WSREP_VARS:
+            if _var not in _already and _var in status:
+                base[_var] = status[_var]
         log.debug(f"[{node['id']}] real status OK — {base['wsrep_local_state_comment']}")
 
     except pymysql.err.OperationalError as e:

@@ -153,12 +153,11 @@ async def lifespan(app: FastAPI):
     cfg   = load_config()
     nodes = [n["id"] for n in cfg.get("nodes", []) if n.get("enabled")]
     arbs  = [a for a in cfg.get("arbitrators", []) if a.get("enabled", True)]
-    mode  = "mock" if cfg.get("settings", {}).get("use_mock", True) else "real"
     log.info(
         f"Starting Galera Orchestrator | nodes={len(nodes)} | "
-        f"arbitrators={len(arbs)} | mode={mode}"
+        f"arbitrators={len(arbs)}"
     )
-    _push_event("info", f"Galera Orchestrator started | nodes={nodes} | arbitrators={len(arbs)} | mode={mode}", "system")
+    _push_event("info", f"Galera Orchestrator started | nodes={nodes} | arbitrators={len(arbs)}", "system")
     yield
     # Graceful shutdown — disconnect all WebSocket clients
     await app.state.ws_manager.shutdown()
@@ -579,7 +578,7 @@ async def force_sst_donor(node_id: str, request: Request):
     try:
         [(ec, out, err)] = ssh_run(
             node,
-            f"mysql -e \"SET GLOBAL wsrep_sst_donor='{donor_host}';\"",
+            f"mysql -e \"SET GLOBAL wsrep_sst_donor='{donor_host}'\"",
             timeout=15,
         )
         ok  = ec == 0
@@ -920,7 +919,7 @@ async def clear_log():
 @app.get("/api/version")
 async def api_version():
     """Return current local commit SHA and check GitHub for the latest commit.
-    Uses a 24-hour server-side cache so we don't hammer the GitHub API.
+    Uses a 5-minute server-side cache so we don't hammer the GitHub API.
     """
     import subprocess, time, urllib.request
 
@@ -941,10 +940,10 @@ async def api_version():
         local_short = "unknown"
         branch = "master"
 
-    # ── remote commit (cached 24h) ────────────────────────────
+    # ── remote commit (cached 5 min) ──────────────────────────
     cache = getattr(api_version, "_cache", None)
     now   = time.time()
-    if cache is None or (now - cache.get("ts", 0)) > 86400:
+    if cache is None or (now - cache.get("ts", 0)) > 300:
         remote_sha   = None
         remote_short = None
         error        = None

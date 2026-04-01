@@ -2268,25 +2268,15 @@ async def sst_status(node_id: str):
     except Exception:
         pass
 
-    # SSH: detect active SST process
+    # SSH: detect active SST process via shared ssh_run()
     try:
-        import paramiko, re as _re
-        client = paramiko.SSHClient()
-        client.set_missing_host_key_policy(paramiko.AutoAddPolicy())
-        client.connect(
-            node.get("host"), port=int(node.get("ssh_port", 22)),
-            username=node.get("ssh_user", "root"),
-            key_filename=str(Path(node.get("ssh_key", "~/.ssh/id_rsa")).expanduser()),
-            timeout=6
-        )
-        _, so, _ = client.exec_command(
+        [(_, proc_out, _)] = ssh_run(
+            node,
             "pgrep -la rsync 2>/dev/null || pgrep -la mariabackup 2>/dev/null || echo none",
             timeout=8
         )
-        proc_out = so.read().decode(errors="replace").strip()
-        if "rsync" in proc_out:      result["sst_method"] = "rsync"
+        if "rsync" in proc_out:         result["sst_method"] = "rsync"
         elif "mariabackup" in proc_out: result["sst_method"] = "mariabackup"
-        client.close()
     except Exception:
         pass
 

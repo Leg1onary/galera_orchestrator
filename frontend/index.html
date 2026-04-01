@@ -915,6 +915,13 @@
             transition: width 0.4s;
             border-radius: 2px;
         }
+
+        /* SST Monitor — animated progress stripe */
+        @keyframes sst-stripe {
+            from { background-position: 0 0; }
+            to   { background-position: 32px 0; }
+        }
+        #sstMonitorCard .card-header { border-bottom: 1px solid var(--color-border); }
     </style>
 </head>
 <body>
@@ -1064,6 +1071,7 @@
                             <option value="gc01_down">🔴 gc01 — Node Down</option>
                             <option value="gc02_down">🔴 gc02 — Node Down</option>
                             <option value="flow_control">🟡 Flow Control Active</option>
+                            <option value="sst_in_progress">🔄 SST In Progress</option>
                         </select>
                     </div>
                 </div>
@@ -2880,6 +2888,15 @@
                 clusterData.nodes[0].metrics.wsrep_flow_control_paused = '0.312';
                 clusterData.nodes[1].metrics.wsrep_flow_control_paused = '0.421';
                 addLog('WARN', 'Flow Control активен. gc02 перегружена — fc_paused=0.42');
+            },
+            sst_in_progress: function() {
+                clusterData.nodes[0].state = 'Donor';
+                clusterData.nodes[0].metrics.wsrep_local_state_comment = 'Donor/Desynced';
+                clusterData.nodes[1].state = 'Joiner';
+                clusterData.nodes[1].metrics.wsrep_local_state_comment = 'Joining';
+                clusterData.nodes[1].metrics.wsrep_local_recv_queue = '12';
+                addLog('WARN', 'SST запущен: gc01 → Donor/Desynced, gc02 → Joiner');
+                addLog('INFO', 'SstMonitor активирован — polling каждые 3 сек');
             }
         };
 
@@ -3846,6 +3863,9 @@
                 Diag.renderSeqnoDelta();
                 Diag.renderWsrepQuick();
             }
+
+            // SST Monitor — запускаем/останавливаем при каждом renderAll (работает и без WS)
+            if (typeof SstMonitor !== 'undefined') SstMonitor.check();
         }
 
         // ---- PUBLIC API ----
@@ -3856,7 +3876,7 @@
             var _INTERVAL = 3000;
 
             function _isJoining(state) {
-                return state === 'Joining' || state === 'Joined' || state === 'Donor/Desynced';
+                return state === 'Joiner' || state === 'Joining' || state === 'Joined' || state === 'Donor/Desynced';
             }
 
             function _startIfNeeded() {
@@ -3893,8 +3913,11 @@
 
                 Promise.all(promises).then(function(results) {
                     _render(joiningNodes, results);
-                    var allSynced = results.every(function(r){ return !r || r.state === 'Synced' || r.state === 'unknown'; });
-                    if (allSynced) _stop();
+                    var allSynced = results.every(function(r){ return !r || r.state === 'Synced'; });
+                    if (allSynced) {
+                        addLog('OK', 'SstMonitor: все ноды Synced — остановка мониторинга');
+                        _stop();
+                    }
                 });
             }
 
@@ -3904,25 +3927,45 @@
                 body.innerHTML = nodes.map(function(node, i) {
                     var r = results[i];
                     if (!r) return '<div style="padding:var(--space-2);color:var(--color-error)">' + (node.name||node.id) + ': ошибка запроса</div>';
-                    var pct = r.progress_pct || 0;
-                    var state = r.state || 'unknown';
-                    var method = r.sst_method || '?';
-                    var donor = r.donor || '';
-                    var stateColor = state === 'Synced' ? 'var(--color-success)' : state === 'Joining' ? 'var(--color-warning)' : 'var(--color-text-muted)';
-                    var barColor = state === 'Synced' ? 'var(--color-success)' : 'var(--color-primary)';
-                    return '<div style="margin-bottom:var(--space-4)">'
-                        + '<div style="display:flex;justify-content:space-between;align-items:center;margin-bottom:6px">'
-                        + '<span style="font-weight:600">' + (node.name||node.id) + '</span>'
-                        + '<span style="font-size:var(--text-xs);color:' + stateColor + ';font-weight:700">' + state + '</span>'
+                    var pct    = typeof r.progress_pct === 'number' ? r.progress_pct : 0;
+                    var state  = r.state || 'unknown';
+                    var method = r.sst_method || '—';
+                    var donor  = r.donor || '';
+                    var recv   = r.recv_queue || 0;
+                    var send   = r.send_queue || 0;
+                    var isSynced = state === 'Synced';
+                    var stateColor = isSynced ? 'var(--color-success)'
+                        : (state === 'Joiner' || state === 'Joining') ? 'var(--color-warning)'
+                            : state === 'Donor/Desynced' ? 'var(--color-orange)'
+                                : 'var(--color-text-muted)';
+                    var barColor = isSynced ? 'var(--color-success)' : 'var(--color-primary)';
+                    // Animated stripes for in-progress
+                    var barStyle = isSynced
+                        ? 'height:100%;width:' + pct + '%;background:' + barColor + ';border-radius:9999px;transition:width 0.6s ease'
+                        : 'height:100%;width:' + pct + '%;background:repeating-linear-gradient(45deg,' + barColor + ',var(--color-primary-hover) 8px,var(--color-primary) 8px,var(--color-primary) 16px);border-radius:9999px;transition:width 0.6s ease;animation:sst-stripe 1s linear infinite;background-size:32px 32px';
+                    return '<div style="margin-bottom:var(--space-5);padding:var(--space-3);background:var(--color-surface);border-radius:var(--radius-md);border:1px solid var(--color-border)">'
+                        // Header row: name + state badge
+                        + '<div style="display:flex;justify-content:space-between;align-items:center;margin-bottom:8px">'
+                        + '<span style="font-weight:600;font-size:var(--text-sm)">' + (node.name||node.id) + '</span>'
+                        + '<span style="font-size:var(--text-xs);color:' + stateColor + ';font-weight:700;background:color-mix(in oklab,' + stateColor + ' 12%,transparent);padding:2px 8px;border-radius:9999px">' + state + '</span>'
                         + '</div>'
-                        + '<div style="font-size:var(--text-xs);color:var(--color-text-muted);margin-bottom:6px">'
-                        + 'Метод: ' + method + (donor ? ' · Донор: ' + donor : '')
-                        + ' · recv_queue: ' + (r.recv_queue || 0)
+                        // Meta row: method · donor · queues
+                        + '<div style="display:flex;flex-wrap:wrap;gap:12px;font-size:var(--text-xs);color:var(--color-text-muted);margin-bottom:8px">'
+                        + '<span>Метод: <strong>' + method + '</strong></span>'
+                        + (donor ? '<span>Донор: <strong>' + donor + '</strong></span>' : '')
+                        + '<span>recv_queue: <strong>' + recv + '</strong></span>'
+                        + (send ? '<span>send_queue: <strong>' + send + '</strong></span>' : '')
                         + '</div>'
-                        + '<div style="height:8px;background:var(--color-surface-offset-2);border-radius:9999px;overflow:hidden">'
-                        + '<div style="height:100%;width:' + pct + '%;background:' + barColor + ';border-radius:9999px;transition:width 0.6s ease"></div>'
+                        // Progress bar
+                        + '<div style="height:10px;background:var(--color-surface-offset-2);border-radius:9999px;overflow:hidden">'
+                        + '<div style="' + barStyle + '"></div>'
                         + '</div>'
-                        + '<div style="font-size:var(--text-xs);color:var(--color-text-muted);margin-top:4px;text-align:right">' + pct + '%</div>'
+                        // Pct label
+                        + '<div style="display:flex;justify-content:space-between;font-size:var(--text-xs);color:var(--color-text-muted);margin-top:4px">'
+                        + '<span>' + (isSynced ? '✓ Синхронизировано' : 'Идёт синхронизация...') + '</span>'
+                        + '<span style="font-weight:700;color:' + (isSynced ? 'var(--color-success)' : 'var(--color-text)') + '">' + pct + '%</span>'
+                        + '</div>'
+                        + (r.message ? '<div style="font-size:var(--text-xs);color:var(--color-text-faint);margin-top:4px">' + r.message + '</div>' : '')
                         + '</div>';
                 }).join('');
             }

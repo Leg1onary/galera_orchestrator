@@ -59,6 +59,30 @@ def _push_event(level: str, message: str, source: str = "system"):
         pass
 
 
+
+# ── SSH Action Rate Limiter ──────────────────────────────────
+# In-memory rate limit: max 10 calls per 60s per node_id.
+# No external dependencies needed.
+import time as _time
+from collections import defaultdict
+_action_calls: dict = defaultdict(list)
+_RATE_LIMIT_MAX  = 10   # max requests
+_RATE_LIMIT_WINDOW = 60 # seconds
+
+def _check_rate_limit(node_id: str) -> None:
+    now = _time.monotonic()
+    window_start = now - _RATE_LIMIT_WINDOW
+    calls = _action_calls[node_id]
+    # Drop stale timestamps
+    _action_calls[node_id] = [t for t in calls if t > window_start]
+    if len(_action_calls[node_id]) >= _RATE_LIMIT_MAX:
+        raise HTTPException(
+            429,
+            f"Rate limit exceeded for node '{node_id}': "
+            f"max {_RATE_LIMIT_MAX} SSH actions per {_RATE_LIMIT_WINDOW}s. Try again later."
+        )
+    _action_calls[node_id].append(now)
+
 @asynccontextmanager
 async def lifespan(app: FastAPI):
     cfg   = load_config()
@@ -1206,69 +1230,71 @@ async def do_bootstrap(payload: BootstrapPayload):
 
     steps = []
 
-    def ssh_run(node, cmd):
+    def _ssh_node_run(node, *cmds, timeout=30):
+        """Open ONE SSH connection, run all cmds sequentially, return list of (ec, out, err)."""
         client = paramiko.SSHClient()
         client.set_missing_host_key_policy(paramiko.AutoAddPolicy())
-        client.connect(node.get("host"), port=int(node.get("ssh_port",22)),
-                       username=node.get("ssh_user","root"),
-                       key_filename=str(Path(node.get("ssh_key","~/.ssh/id_rsa")).expanduser()),
-                       timeout=10)
+        client.connect(
+            node.get("host"), port=int(node.get("ssh_port", 22)),
+            username=node.get("ssh_user", "root"),
+            key_filename=str(Path(node.get("ssh_key", "~/.ssh/id_rsa")).expanduser()),
+            timeout=10,
+        )
+        results = []
         try:
-            _, so, se = client.exec_command(cmd, timeout=30)
-            out = so.read().decode(errors="replace").strip()
-            err = se.read().decode(errors="replace").strip()
-            ec  = so.channel.recv_exit_status()
-            return ec, out, err
+            for cmd in cmds:
+                _, so, se = client.exec_command(cmd, timeout=timeout)
+                out = so.read().decode(errors="replace").strip()
+                err = se.read().decode(errors="replace").strip()
+                ec  = so.channel.recv_exit_status()
+                results.append((ec, out, err))
         finally:
             client.close()
+        return results
 
-    def ssh_service_state(node):
-        ec, out, err = ssh_run(node, "systemctl is-active mariadb.service")
-        state = (out or err or "unknown").strip()
-        return ec, state
-
+    # Step 1: pre-bootstrap systemd check — mariadb must be stopped on non-candidate nodes
     active_nodes = []
     for node in nodes:
         if node["id"] == payload.candidate:
             continue
         try:
-            _, state = ssh_service_state(node)
+            [(ec, state, _)] = _ssh_node_run(node, "systemctl is-active mariadb.service", timeout=8)
             if state == "active":
                 active_nodes.append(node["id"])
         except Exception as e:
-            steps.append({"step":1,"status":"error","message":f"systemd check failed on {node['id']}: {e}"})
+            steps.append({"step": 1, "status": "error", "message": f"systemd check failed on {node['id']}: {e}"})
             return {"ok": False, "mock": False, "steps": steps}
 
     if active_nodes:
         steps.append({
-            "step": 1,
-            "status": "error",
+            "step": 1, "status": "error",
             "message": "Bootstrap blocked: stop mariadb.service on non-candidate nodes first: " + ", ".join(active_nodes)
         })
         return {"ok": False, "mock": False, "steps": steps}
 
-    steps.append({"step":1,"status":"ok","message":"Pre-bootstrap systemd check passed: mariadb.service is stopped on all non-candidate nodes"})
+    steps.append({"step": 1, "status": "ok",
+                  "message": "Pre-bootstrap systemd check passed: mariadb.service stopped on all non-candidate nodes"})
 
-    # Step 2: galera_new_cluster on candidate
+    # Step 2: galera_new_cluster on candidate (single SSH session)
     try:
-        ec, out, err = ssh_run(candidate, "galera_new_cluster")
+        [(ec, out, err)] = _ssh_node_run(candidate, "galera_new_cluster", timeout=60)
         if ec != 0:
             raise Exception(err or f"exit_code={ec}")
-        steps.append({"step":2,"status":"ok",
-                      "message":f"galera_new_cluster на {payload.candidate} — OK"})
+        steps.append({"step": 2, "status": "ok",
+                      "message": f"galera_new_cluster на {payload.candidate} — OK"})
     except Exception as e:
-        steps.append({"step":2,"status":"error","message":f"galera_new_cluster failed: {e}"})
+        steps.append({"step": 2, "status": "error", "message": f"galera_new_cluster failed: {e}"})
         return {"ok": False, "mock": False, "steps": steps}
 
-    # Step 3: start other nodes
+    # Step 3: start other nodes — each gets one SSH session for the start command
     joiners = [n for n in nodes if n["id"] != payload.candidate]
     for i, n in enumerate(joiners, 3):
         try:
-            ec, out, err = ssh_run(n, "systemctl start mariadb.service")
-            steps.append({"step":i,"status":"ok",
-                          "message":f"systemctl start mariadb на {n['id']} — exit={ec}"})
+            [(ec, out, err)] = _ssh_node_run(n, "systemctl start mariadb.service", timeout=30)
+            steps.append({"step": i, "status": "ok",
+                          "message": f"systemctl start mariadb на {n['id']} — exit={ec}"})
         except Exception as e:
-            steps.append({"step":i,"status":"error","message":f"{n['id']}: {e}"})
+            steps.append({"step": i, "status": "error", "message": f"{n['id']}: {e}"})
 
     return {"ok": True, "mock": False, "steps": steps}
 
@@ -1307,36 +1333,36 @@ async def do_rejoin(payload: RejoinPayload):
     except ImportError:
         raise HTTPException(500, "paramiko not installed")
 
-    def ssh_run(cmd):
-        client = paramiko.SSHClient()
-        client.set_missing_host_key_policy(paramiko.AutoAddPolicy())
-        client.connect(node.get("host"), port=int(node.get("ssh_port",22)),
-                       username=node.get("ssh_user","root"),
-                       key_filename=str(Path(node.get("ssh_key","~/.ssh/id_rsa")).expanduser()),
-                       timeout=10)
-        _, so, se = client.exec_command(cmd, timeout=60)
-        out = so.read().decode(errors="replace").strip()
-        err = se.read().decode(errors="replace").strip()
-        ec  = so.channel.recv_exit_status()
-        client.close()
-        return ec, out, err
-
-    # Stop → configure wsrep_sst_method if SST → Start
+    # Build command list, then run all in a SINGLE SSH session
     cmds = ["systemctl stop mariadb.service"]
     if payload.method == "sst":
         cmds.append("sed -i 's/wsrep_sst_method=.*/wsrep_sst_method=rsync/' /etc/mysql/mariadb.conf.d/galera.cnf")
     cmds.append("systemctl start mariadb.service")
 
-    for i, cmd in enumerate(cmds, 1):
-        try:
-            ec, out, err = ssh_run(cmd)
-            steps.append({"step":i,"status":"ok","message":f"{cmd} → exit={ec}"})
-            if ec != 0:
-                steps.append({"step":i+1,"status":"error","message":err or "non-zero exit"})
+    client = paramiko.SSHClient()
+    client.set_missing_host_key_policy(paramiko.AutoAddPolicy())
+    try:
+        client.connect(
+            node.get("host"), port=int(node.get("ssh_port", 22)),
+            username=node.get("ssh_user", "root"),
+            key_filename=str(Path(node.get("ssh_key", "~/.ssh/id_rsa")).expanduser()),
+            timeout=10,
+        )
+        for i, cmd in enumerate(cmds, 1):
+            try:
+                _, so, se = client.exec_command(cmd, timeout=60)
+                out = so.read().decode(errors="replace").strip()
+                err = se.read().decode(errors="replace").strip()
+                ec  = so.channel.recv_exit_status()
+                steps.append({"step": i, "status": "ok", "message": f"{cmd} → exit={ec}"})
+                if ec != 0:
+                    steps.append({"step": i + 1, "status": "error", "message": err or "non-zero exit"})
+                    return {"ok": False, "mock": False, "steps": steps}
+            except Exception as e:
+                steps.append({"step": i, "status": "error", "message": str(e)})
                 return {"ok": False, "mock": False, "steps": steps}
-        except Exception as e:
-            steps.append({"step":i,"status":"error","message":str(e)})
-            return {"ok": False, "mock": False, "steps": steps}
+    finally:
+        client.close()
 
     steps.append({"step":len(steps)+1,"status":"done","message":f"Rejoin {payload.node_id} запущен. Ждите Synced."})
     return {"ok": True, "mock": False, "node_id": payload.node_id, "method": payload.method, "steps": steps}
@@ -1636,6 +1662,9 @@ async def node_action(node_id: str, payload: NodeActionPayload):
 
     if payload.action not in ALLOWED_ACTIONS:
         raise HTTPException(400, f"Unknown action '{payload.action}'. Allowed: {list(ALLOWED_ACTIONS)}")
+
+    if not cfg.get("settings", {}).get("use_mock", True):
+        _check_rate_limit(node_id)
 
     node = next((n for n in cfg.get("nodes", []) if n["id"] == node_id), None)
     if not node:

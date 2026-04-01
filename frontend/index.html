@@ -308,6 +308,7 @@
         .btn-warning   { background: var(--warning); color: #fff; }
         .btn-warning:hover { filter: brightness(1.1); }
         .btn-ghost     { background: var(--surface-2); border-color: var(--border); color: var(--text-muted); }
+        a.btn-ghost    { text-decoration: none !important; }
         .btn-ghost:hover   { background: var(--surface-3); color: var(--text); }
         .btn-sm { height: 34px; padding: var(--space-1) var(--space-4); font-size: var(--text-xs); }
         .btn-lg { height: 48px; padding: var(--space-3) var(--space-8); font-size: var(--text-base); }
@@ -6515,6 +6516,7 @@
 
     // Expose to global nav for page-docs onclick
     window.InnodbStatus = InnodbStatus;
+    window.Diag = Diag;
 
 
 </script>

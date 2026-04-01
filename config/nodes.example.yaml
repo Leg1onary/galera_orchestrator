@@ -78,5 +78,5 @@ settings:
   use_mock: true      # true = mock (симуляция), false = real
 
 # Технические снапшоты — управляются автоматически, не редактировать вручню
-nreal_nodes: []
+real_nodes: []
 mock_nodes: []

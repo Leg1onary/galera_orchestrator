@@ -730,29 +730,51 @@ async def compare_galera_cnf():
 
     import concurrent.futures
 
+    CNF_PATHS = [
+        "/etc/mysql/conf.d/galera.cnf",
+        "/etc/mysql/mariadb.conf.d/galera.cnf",
+    ]
+
     def _read_cnf(node):
+        # Определяем реальный путь к файлу на ноде
         cmd = (
-            "cat /etc/mysql/conf.d/galera.cnf 2>/dev/null "
-            "|| cat /etc/mysql/mariadb.conf.d/galera.cnf 2>/dev/null "
+            "( for f in /etc/mysql/conf.d/galera.cnf /etc/mysql/mariadb.conf.d/galera.cnf; do "
+            "  [ -f \"$f\" ] && echo \"__cnf_path__:$f\" && cat \"$f\" && break; "
+            "done ) 2>/dev/null "
             "|| grep -A 200 '\\[galera\\]' /etc/mysql/my.cnf 2>/dev/null "
             "|| grep -r 'wsrep' /etc/mysql/ 2>/dev/null | head -60"
         )
         try:
             [(ec, out, err)] = ssh_run(node, cmd, timeout=12)
-            return node["id"], out or err, None
+            raw = out or err
+            # Извлекаем реальный путь из маркера __cnf_path__
+            cnf_path = None
+            clean_lines = []
+            for line in raw.splitlines():
+                if line.startswith("__cnf_path__:"):
+                    cnf_path = line.split(":", 1)[1].strip()
+                else:
+                    clean_lines.append(line)
+            clean_raw = "\n".join(clean_lines)
+            return node["id"], clean_raw, None, cnf_path
         except Exception as e:
-            return node["id"], "", str(e)
+            return node["id"], "", str(e), None
 
     results = {}
     with concurrent.futures.ThreadPoolExecutor(max_workers=8) as ex:
-        for nid, raw, err in ex.map(_read_cnf, nodes):
+        for nid, raw, err, cnf_path in ex.map(_read_cnf, nodes):
             params = {}
             for line in raw.splitlines():
                 line = line.strip()
                 if "=" in line and not line.startswith("#"):
                     k, _, v = line.partition("=")
                     params[k.strip()] = v.strip()
-            results[nid] = {"params": params, "raw": raw, "error": err}
+            results[nid] = {
+                "params":   params,
+                "raw":      raw,
+                "error":    err,
+                "cnf_path": cnf_path,
+            }
 
     all_keys = set()
     for v in results.values():
@@ -762,13 +784,30 @@ async def compare_galera_cnf():
     for key in sorted(all_keys):
         params_matrix[key] = {nid: results[nid]["params"].get(key, "") for nid in results}
 
+    # details — per-node статус для фронтенда (_renderCnfCompare)
+    details = {
+        nid: {
+            "ok":       results[nid]["error"] is None,
+            "error":    results[nid]["error"] or "",
+            "cnf_path": results[nid]["cnf_path"] or "/etc/mysql/conf.d/galera.cnf",
+        }
+        for nid in results
+    }
+
+    # Общий cnf_path — берём первый реально найденный или дефолт
+    common_cnf_path = next(
+        (results[nid]["cnf_path"] for nid in results if results[nid]["cnf_path"]),
+        "/etc/mysql/conf.d/galera.cnf",
+    )
+
     return {
         "ok":       True,
         "nodes":    [n["id"] for n in nodes],
         "params":   params_matrix,
         "raw":      {nid: results[nid]["raw"]   for nid in results},
         "errors":   {nid: results[nid]["error"] for nid in results if results[nid]["error"]},
-        "cnf_path": "/etc/mysql/conf.d/galera.cnf",
+        "cnf_path": common_cnf_path,
+        "details":  details,
     }
 
 

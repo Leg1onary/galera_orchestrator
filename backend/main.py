@@ -481,10 +481,14 @@ async def garbd_log(arb_id: str, lines: int = 100):
     if not arb:
         raise HTTPException(404, f"Arbitrator '{arb_id}' not found")
     cmd = (
-        f"timeout 10 journalctl -u garbd --no-pager -n {lines} 2>/dev/null "
-        f"|| timeout 10 tail -n {lines} /var/log/garbd.log 2>/dev/null "
-        f"|| timeout 10 journalctl -u garbd.service --no-pager -n {lines} 2>/dev/null "
-        f"|| echo 'Log not found'"
+        f"UNIT=$(systemctl list-units --type=service --no-legend 2>/dev/null "
+        f"| awk '{{print $1}}' | grep -E 'garb|galera-arb' | head -1); "
+        f"if [ -n \"$UNIT\" ]; then "
+        f"  journalctl -u \"$UNIT\" --no-pager -n {lines} --output=short-iso 2>/dev/null; "
+        f"else "
+        f"  tail -n {lines} /var/log/garbd.log 2>/dev/null "
+        f"  || echo 'Log not found'; "
+        f"fi"
     )
     try:
         [(ec, out, err)] = ssh_run(arb, cmd, timeout=15)

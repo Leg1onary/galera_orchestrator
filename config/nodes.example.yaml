@@ -77,6 +77,3 @@ settings:
   poll_interval: 5    # секунды между опросами в real-режиме
   use_mock: true      # true = mock (симуляция), false = real
 
-# Технические снапшоты — управляются автоматически, не редактировать вручню
-real_nodes: []
-mock_nodes: []

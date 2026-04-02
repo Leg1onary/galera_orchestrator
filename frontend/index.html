@@ -6256,7 +6256,7 @@
                         }
                     }
 
-                    if (!data.results || !data.results.length) {
+                    if (!data.nodes || !data.nodes.length) {
                         if (container) container.innerHTML = '<div style="padding:var(--space-4);color:var(--color-text-muted)">Нет нод</div>';
                         return;
                     }
@@ -6284,7 +6284,7 @@
                         + '<th style="' + thStyle + '">Uptime</th>'
                         + '</tr></thead><tbody>';
 
-                    data.results.forEach(function(r) {
+                    data.nodes.forEach(function(r) {
                         var rowBg = r.crit
                             ? 'background:color-mix(in oklch,var(--color-error) 6%,var(--color-surface))'
                             : r.warn

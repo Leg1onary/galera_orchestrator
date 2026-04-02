@@ -41,7 +41,7 @@ def USE_MOCK(cfg: dict) -> bool:
 def get_cluster_status(cfg: dict) -> dict:
     nodes_cfg = cfg.get("nodes", [])
     # Support both singular 'arbitrator' (legacy) and plural 'arbitrators' list
-    arbs_cfg  = cfg.get("arbitrators", [])
+    arbs_cfg = cfg.get("arbitrators", [])
     if not arbs_cfg:
         arb_single = cfg.get("arbitrator", {})
         if arb_single:
@@ -65,14 +65,15 @@ def get_cluster_status(cfg: dict) -> dict:
                 except Exception as e:
                     ordered[nid] = {
                         "id": nid, "name": nid, "host": "", "port": 3306,
-                        "online": False, "error": f"executor error: {e}"
+                        "online": False, "error": f"executor error: {e}",
+                        "state": "Offline",
                     }
         results = [ordered[n["id"]] for n in enabled_nodes]
 
     # Enrich results with ssh/dc fields from nodes_cfg
     _cfg_by_id = {n["id"]: n for n in enabled_nodes}
     for r in results:
-        nid = r.get("id")
+        nid  = r.get("id")
         ncfg = _cfg_by_id.get(nid, {})
         r.setdefault("ssh_port", ncfg.get("ssh_port", 22))
         r.setdefault("ssh_user", ncfg.get("ssh_user", "root"))
@@ -104,33 +105,34 @@ def get_cluster_status(cfg: dict) -> dict:
             arb_statuses.append(_arb_status_real(arb))
 
     return {
-        "cluster_name":   cfg.get("cluster", {}).get("name", "galera-cluster"),
-        "environment":    cfg.get("cluster", {}).get("environment", "test"),
+        "cluster_name":  cfg.get("cluster", {}).get("name",        "galera-cluster"),
+        "environment":   cfg.get("cluster", {}).get("environment", "test"),
         "cluster_status": cluster_status,
-        "cluster_size":   results[0]["wsrep_cluster_size"] if results else 0,
-        "nodes_total":    len(results),
-        "nodes_synced":   synced,
-        "nodes_online":   online,
-        "flow_control":   round(fc_paused, 2),
-        "cert_failures":  cert_fail,
-        "use_mock":       USE_MOCK(cfg),
-        # Legacy single arbitrator field (kept for backwards compat with old UI code)
-        "arbitrator":     arb_statuses[0] if arb_statuses else {"enabled": False, "online": False},
+        "cluster_size":  results[0]["wsrep_cluster_size"] if results else 0,
+        "nodes_total":   len(results),
+        "nodes_synced":  synced,
+        "nodes_online":  online,
+        "flow_control":  round(fc_paused, 2),
+        "cert_failures": cert_fail,
+        "use_mock":      USE_MOCK(cfg),
+        # Legacy single arbitrator field (backwards compat)
+        "arbitrator":    arb_statuses[0] if arb_statuses else {"enabled": False, "online": False},
         # New list field for multi-arbitrator UI
-        "arbitrators":    arb_statuses,
-        "nodes":          results,
+        "arbitrators":   arb_statuses,
+        "nodes":         results,
     }
 
 
 def _real_node_status(node: dict, cfg: dict) -> dict:
     """Connect via TCP to MariaDB and fetch wsrep status variables."""
     base = {
-        "id":   node["id"],
-        "name": node.get("name", node["id"]),
-        "host": node.get("host", ""),
-        "port": node.get("port", 3306),
+        "id":     node["id"],
+        "name":   node.get("name", node["id"]),
+        "host":   node.get("host", ""),
+        "port":   node.get("port", 3306),
         "online": False,
-        "error": None,
+        "error":  None,
+        "state":  "Offline",   # FIX: default state для UI (node.state используется в 30+ местах)
     }
 
     if not HAS_PYMYSQL:
@@ -159,44 +161,48 @@ def _real_node_status(node: dict, cfg: dict) -> dict:
         conn.close()
 
         status = {row[0]: row[1] for row in rows}
-        read_only_val = ro_rows[0][1].upper() if ro_rows else 'OFF'
+        read_only_val = ro_rows[0][1].upper() if ro_rows else "OFF"
 
         def _int(k):
-            try: return int(status.get(k, 0))
+            try:   return int(status.get(k, 0))
             except: return 0
 
         def _float(k):
-            try: return float(status.get(k, 0))
+            try:   return float(status.get(k, 0))
             except: return 0.0
 
+        state_comment = status.get("wsrep_local_state_comment", "unknown")
+
         base.update({
-            "online":                       True,
-            "wsrep_cluster_status":         status.get("wsrep_cluster_status", "unknown"),
-            "wsrep_local_state_comment":    status.get("wsrep_local_state_comment", "unknown"),
-            "wsrep_connected":              status.get("wsrep_connected", "OFF"),
-            "wsrep_ready":                  status.get("wsrep_ready", "OFF"),
-            "wsrep_cluster_size":           _int("wsrep_cluster_size"),
-            "wsrep_local_send_queue":       _int("wsrep_local_send_queue"),
-            "wsrep_local_recv_queue":       _int("wsrep_local_recv_queue"),
-            "wsrep_flow_control_paused":    str(round(_float("wsrep_flow_control_paused"), 4)),
-            "wsrep_local_commits":          _int("wsrep_local_commits"),
-            "wsrep_last_committed":         _int("wsrep_last_committed"),
-            "wsrep_local_cert_failures":    _int("wsrep_local_cert_failures"),
-            "wsrep_bf_aborts":              _int("wsrep_bf_aborts"),
-            "wsrep_cert_deps_distance":     round(_float("wsrep_cert_deps_distance"), 2),
-            "wsrep_apply_oooe":             round(_float("wsrep_apply_oooe"), 4),
-            "wsrep_cluster_conf_id":        _int("wsrep_cluster_conf_id"),
-            "wsrep_cluster_state_uuid":     status.get("wsrep_cluster_state_uuid", ""),
-            "read_only":                    read_only_val == "ON",
+            "online":                    True,
+            # FIX: добавлено поле "state" — UI использует node.state везде
+            "state":                     state_comment,
+            "wsrep_cluster_status":      status.get("wsrep_cluster_status", "unknown"),
+            "wsrep_local_state_comment": state_comment,
+            "wsrep_connected":           status.get("wsrep_connected", "OFF"),
+            "wsrep_ready":               status.get("wsrep_ready",     "OFF"),
+            "wsrep_cluster_size":        _int("wsrep_cluster_size"),
+            "wsrep_local_send_queue":    _int("wsrep_local_send_queue"),
+            "wsrep_local_recv_queue":    _int("wsrep_local_recv_queue"),
+            "wsrep_flow_control_paused": str(round(_float("wsrep_flow_control_paused"), 4)),
+            "wsrep_local_commits":       _int("wsrep_local_commits"),
+            "wsrep_last_committed":      _int("wsrep_last_committed"),
+            "wsrep_local_cert_failures": _int("wsrep_local_cert_failures"),
+            "wsrep_bf_aborts":           _int("wsrep_bf_aborts"),
+            "wsrep_cert_deps_distance":  round(_float("wsrep_cert_deps_distance"), 2),
+            "wsrep_apply_oooe":          round(_float("wsrep_apply_oooe"), 4),
+            "wsrep_cluster_conf_id":     _int("wsrep_cluster_conf_id"),
+            "wsrep_cluster_state_uuid":  status.get("wsrep_cluster_state_uuid", ""),
+            "read_only":                 read_only_val == "ON",
         })
         _already = set(base.keys())
         for _var in WSREP_VARS:
             if _var not in _already and _var in status:
                 base[_var] = status[_var]
-        log.debug(f"[{node['id']}] real status OK — {base['wsrep_local_state_comment']}")
+        log.debug(f"[{node['id']}] real status OK — {state_comment}")
 
     except pymysql.err.OperationalError as e:
-        base["error"] = f"DB connect error: {e.args[1] if len(e.args)>1 else str(e)}"
+        base["error"] = f"DB connect error: {e.args[1] if len(e.args) > 1 else str(e)}"
         log.warning(f"[{node['id']}] {base['error']}")
     except Exception as e:
         base["error"] = str(e)
@@ -227,8 +233,8 @@ def _arb_status_real(arb_cfg: dict) -> dict:
             "enabled": True,
             "online":  ec == 0 and out == "active",
             "host":    arb_cfg.get("host", ""),
-            "id":      arb_cfg.get("id", ""),
-            "dc":      arb_cfg.get("dc", ""),
+            "id":      arb_cfg.get("id",   ""),
+            "dc":      arb_cfg.get("dc",   ""),
             "state":   out,
             "error":   None,
         }

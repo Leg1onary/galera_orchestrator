@@ -9,7 +9,6 @@ from fastapi.staticfiles import StaticFiles
 from pydantic import BaseModel
 from typing import Optional
 
-
 from config import load_config, save_config
 from galera_client import get_cluster_status
 from mock_data import set_scenario, get_scenario
@@ -39,15 +38,34 @@ def ssh_run(node: dict, *cmds: str, timeout: int = 30) -> list:
             _, so, se = client.exec_command(cmd, timeout=timeout)
             out = so.read().decode(errors="replace").strip()
             err = se.read().decode(errors="replace").strip()
-            ec  = so.channel.recv_exit_status()
+            ec = so.channel.recv_exit_status()
             results.append((ec, out, err))
     finally:
         client.close()
     return results
 
 
+# ── Unified DB connection helper ─────────────────────────────
+def _db_connect(node: dict, cfg: dict, **kwargs):
+    """Unified DB connection using correct field names from nodes.yaml.
+
+    nodes.yaml stores: port (not db_port), db_password (not db_pass).
+    Falls back to global cfg[db] block for user/password if not set per-node.
+    """
+    import pymysql
+    db_cfg = cfg.get("db", {})
+    host   = node.get("host")
+    port   = int(node.get("port") or node.get("db_port") or 3306)
+    user   = node.get("db_user")     or db_cfg.get("user",     "root")
+    passwd = node.get("db_password") or node.get("db_pass") or db_cfg.get("password", "")
+    return pymysql.connect(
+        host=host, port=port, user=user, password=passwd,
+        connect_timeout=5, **kwargs
+    )
+
+
 # ── Persistent event log ─────────────────────────────────────────
-_LOG_DIR  = Path(__file__).parent.parent / "logs"
+_LOG_DIR = Path(__file__).parent.parent / "logs"
 _LOG_DIR.mkdir(parents=True, exist_ok=True)
 _LOG_FILE = _LOG_DIR / "events.log"
 
@@ -58,7 +76,6 @@ logging.basicConfig(
     format="%(asctime)s [%(levelname)s] %(name)s: %(message)s",
 )
 log = logging.getLogger("galera_orchestrator")
-
 
 def _push_event(level: str, msg: str, source: str = "system"):
     entry = {
@@ -73,10 +90,8 @@ def _push_event(level: str, msg: str, source: str = "system"):
             fh.write(json.dumps(entry) + "\n")
     except Exception:
         pass
-    # Broadcast via WebSocket manager stored in app.state (set during lifespan).
-    # Falls back gracefully when called before startup (e.g. import-time code).
     try:
-        mgr = app.state.ws_manager
+        mgr  = app.state.ws_manager
         loop = asyncio.get_running_loop()
         loop.create_task(mgr.broadcast({"type": "event", **entry}))
     except RuntimeError:
@@ -90,10 +105,6 @@ class _WsManager:
     """
     Tracks active WebSocket connections and broadcasts JSON messages.
     All public methods are coroutines and must be called from an async context.
-
-    This class intentionally holds no reference to ``app`` or any module-level
-    hidden global dependency — the manager is injected via FastAPI's
-    application state during lifespan startup.
     """
     def __init__(self):
         self._connections: list = []
@@ -133,33 +144,27 @@ _RATE_LIMIT_MAX    = 5   # max SSH action requests per node
 _RATE_LIMIT_WINDOW = 60  # seconds
 
 def _check_rate_limit(node_id: str):
-    now = _time.monotonic()
+    now          = _time.monotonic()
     window_start = now - _RATE_LIMIT_WINDOW
     _action_calls[node_id] = [t for t in _action_calls[node_id] if t > window_start]
     if len(_action_calls[node_id]) >= _RATE_LIMIT_MAX:
         raise HTTPException(
             429,
             f"Rate limit exceeded for node '{node_id}': "
-            f"max {_RATE_LIMIT_MAX} SSH actions per {_RATE_LIMIT_WINDOW}s. Try again later."
+            f"max {_RATE_LIMIT_MAX} SSH actions per {_RATE_LIMIT_WINDOW}s. Try again later.",
         )
     _action_calls[node_id].append(now)
 
+
 @asynccontextmanager
 async def lifespan(app: FastAPI):
-    # Attach WebSocket manager to app.state so every part of the codebase
-    # can reach it via ``app.state.ws_manager`` without touching module globals.
     app.state.ws_manager = _WsManager()
-
-    cfg   = load_config()
+    cfg  = load_config()
     nodes = [n["id"] for n in cfg.get("nodes", []) if n.get("enabled")]
     arbs  = [a for a in cfg.get("arbitrators", []) if a.get("enabled", True)]
-    log.info(
-        f"Starting Galera Orchestrator | nodes={len(nodes)} | "
-        f"arbitrators={len(arbs)}"
-    )
+    log.info(f"Starting Galera Orchestrator | nodes={len(nodes)} | arbitrators={len(arbs)}")
     _push_event("info", f"Galera Orchestrator started | nodes={nodes} | arbitrators={len(arbs)}", "system")
     yield
-    # Graceful shutdown — disconnect all WebSocket clients
     await app.state.ws_manager.shutdown()
 
 
@@ -175,19 +180,18 @@ app.mount("/assets", StaticFiles(directory=str(ASSETS)), name="assets")
 async def index():
     return FileResponse(str(FRONTEND / "index.html"))
 
+
 @app.get("/favicon.ico", include_in_schema=False)
 async def favicon():
     return FileResponse(str(FRONTEND / "favicon.ico"))
+
 
 @app.get("/api/status")
 async def api_status():
     global _prev_status
     try:
         cfg  = load_config()
-        mode = cfg.get("settings", {}).get("use_mock", True)
-        data = await asyncio.get_event_loop().run_in_executor(
-            None, get_cluster_status, cfg
-        )
+        data = await asyncio.get_event_loop().run_in_executor(None, get_cluster_status, cfg)
         status = data.get("cluster", {}).get("status", "unknown")
         if status != _prev_status:
             _push_event("info", f"Cluster status changed: {_prev_status} → {status}", "monitor")
@@ -206,35 +210,32 @@ async def set_scenario_api(name: str):
     _push_event("info", f"Mock scenario set: {name}", "ui")
     return {"ok": True, "scenario": name}
 
+
 @app.get("/api/scenario")
 async def get_scenario_api():
     return {"scenario": get_scenario()}
+
 
 @app.get("/api/config")
 async def get_config():
     return load_config()
 
+
 @app.get("/api/nodes")
 async def list_nodes():
     cfg = load_config()
-    nodes = cfg.get("nodes", [])
-    return {"nodes": nodes}
+    return {"nodes": cfg.get("nodes", [])}
 
 
 @app.get("/api/node/{node_id}/test-connection")
 async def test_node_connection(node_id: str):
-    """SSH + DB connectivity check.
-
-    Returns ``{ok, ssh: {ok, message}, db: {ok, message}}`` so the UI can
-    display separate SSH and MariaDB status lines.
-    """
-    cfg   = load_config()
-    nodes = cfg.get("nodes", [])
-    node  = next((n for n in nodes if n["id"] == node_id), None)
+    """SSH + DB connectivity check."""
+    cfg  = load_config()
+    node = next((n for n in cfg.get("nodes", []) if n["id"] == node_id), None)
     if not node:
         raise HTTPException(404, f"Node '{node_id}' not found")
 
-    # ── SSH check ────────────────────────────────────────────
+    # SSH check
     try:
         [(ec, out, err)] = ssh_run(node, "echo ok", timeout=8)
         ssh_ok  = ec == 0 and out.strip() == "ok"
@@ -243,20 +244,11 @@ async def test_node_connection(node_id: str):
         ssh_ok  = False
         ssh_msg = str(e)
 
-    # ── DB check ─────────────────────────────────────────────
+    # DB check
     db_ok  = False
     db_msg = "Not tested"
     try:
-        import pymysql
-        db_cfg   = cfg.get("db", {})
-        db_port  = int(node.get("port") or node.get("db_port") or 3306)
-        db_user  = node.get("db_user")     or db_cfg.get("user",     "root")
-        db_pass  = node.get("db_password") or node.get("db_pass") or db_cfg.get("password", "")
-        conn = pymysql.connect(
-            host=node.get("host"), port=db_port,
-            user=db_user, password=db_pass,
-            connect_timeout=4,
-        )
+        conn = _db_connect(node, cfg, connect_timeout=4)
         conn.close()
         db_ok  = True
         db_msg = "Connected"
@@ -273,23 +265,22 @@ async def test_node_connection(node_id: str):
 class NodeActionRequest(BaseModel):
     action: str
 
+
 @app.post("/api/node/{node_id}/action")
 async def node_action(node_id: str, body: NodeActionRequest):
     """Execute a predefined SSH action on a single Galera node."""
     _check_rate_limit(node_id)
-
-    cfg   = load_config()
-    nodes = cfg.get("nodes", [])
-    node  = next((n for n in nodes if n["id"] == node_id), None)
+    cfg  = load_config()
+    node = next((n for n in cfg.get("nodes", []) if n["id"] == node_id), None)
     if not node:
         raise HTTPException(404, f"Node '{node_id}' not found")
 
     msgs = {
-        "stop":           "systemctl stop mariadb",
-        "start":          "systemctl start mariadb",
-        "restart":        "systemctl restart mariadb",
-        "set_read_only":  "mysql -e \"SET GLOBAL read_only=1;\"",
-        "set_read_write": "mysql -e \"SET GLOBAL read_only=0;\"",
+        "stop":          "systemctl stop mariadb",
+        "start":         "systemctl start mariadb",
+        "restart":       "systemctl restart mariadb",
+        "set_read_only": "mysql -e \"SET GLOBAL read_only=1;\"",
+        "set_read_write":"mysql -e \"SET GLOBAL read_only=0;\"",
     }
     cmd = msgs.get(body.action)
     if not cmd:
@@ -297,13 +288,9 @@ async def node_action(node_id: str, body: NodeActionRequest):
 
     try:
         [(ec, out, err)] = ssh_run(node, cmd, timeout=30)
-        ok = ec == 0
+        ok  = ec == 0
         msg = out or err or ("ok" if ok else "error")
-        _push_event(
-            "info" if ok else "error",
-            f"Action '{body.action}' on {node_id}: {msg}",
-            "ui",
-        )
+        _push_event("info" if ok else "error", f"Action '{body.action}' on {node_id}: {msg}", "ui")
         return {"ok": ok, "msg": msg}
     except Exception as e:
         _push_event("error", f"Action '{body.action}' on {node_id} failed: {e}", "ui")
@@ -315,11 +302,12 @@ async def get_mode():
     cfg = load_config()
     return {"use_mock": cfg.get("settings", {}).get("use_mock", True)}
 
+
 @app.post("/api/config/mode")
 async def set_mode(request: Request):
-    body = await request.json()
+    body     = await request.json()
     use_mock = bool(body.get("use_mock", True))
-    cfg = load_config()
+    cfg      = load_config()
     cfg.setdefault("settings", {})["use_mock"] = use_mock
     save_config(cfg)
     _push_event("info", f"Data mode changed to {'mock' if use_mock else 'real'}", "ui")
@@ -327,33 +315,34 @@ async def set_mode(request: Request):
 
 
 class NodeConfig(BaseModel):
-    id: str
-    label: str
-    host: str
+    id:       str
+    label:    str
+    host:     str
     ssh_port: int = 22
     ssh_user: str = "root"
-    ssh_key: str = "~/.ssh/id_rsa"
-    db_port: int = 3306
-    db_user: str = "root"
-    db_pass: str = ""
-    enabled: bool = True
+    ssh_key:  str = "~/.ssh/id_rsa"
+    db_port:  int = 3306
+    db_user:  str = "root"
+    db_pass:  str = ""
+    enabled:  bool = True
+
 
 @app.post("/api/config/node")
 async def add_node(node: NodeConfig):
-    cfg = load_config()
+    cfg   = load_config()
     nodes = cfg.get("nodes", [])
     if any(n["id"] == node.id for n in nodes):
         raise HTTPException(409, f"Node '{node.id}' already exists")
     node_dict = {
         "id":          node.id,
-        "name":        node.label,        # NodeConfig.label  → YAML name
+        "name":        node.label,
         "host":        node.host,
-        "port":        node.db_port,      # NodeConfig.db_port → YAML port
+        "port":        node.db_port,        # NodeConfig.db_port → YAML port
         "ssh_port":    node.ssh_port,
         "ssh_user":    node.ssh_user,
         "ssh_key":     node.ssh_key,
         "db_user":     node.db_user,
-        "db_password": node.db_pass,      # NodeConfig.db_pass → YAML db_password
+        "db_password": node.db_pass,        # NodeConfig.db_pass → YAML db_password
         "enabled":     node.enabled,
     }
     nodes.append(node_dict)
@@ -362,10 +351,11 @@ async def add_node(node: NodeConfig):
     _push_event("info", f"Node added: {node.id} ({node.host})", "ui")
     return {"ok": True, "node": node_dict}
 
+
 @app.delete("/api/config/node/{node_id}")
 async def delete_node(node_id: str):
-    cfg = load_config()
-    nodes = cfg.get("nodes", [])
+    cfg       = load_config()
+    nodes     = cfg.get("nodes", [])
     new_nodes = [n for n in nodes if n["id"] != node_id]
     if len(new_nodes) == len(nodes):
         raise HTTPException(404, f"Node '{node_id}' not found")
@@ -376,18 +366,19 @@ async def delete_node(node_id: str):
 
 
 class ArbitratorConfig(BaseModel):
-    id: str
-    label: str
-    host: str
-    ssh_port: int = 22
-    ssh_user: str = "root"
-    ssh_key: str = "~/.ssh/id_rsa"
+    id:         str
+    label:      str
+    host:       str
+    ssh_port:   int = 22
+    ssh_user:   str = "root"
+    ssh_key:    str = "~/.ssh/id_rsa"
     garbd_port: int = 4567
-    enabled: bool = True
+    enabled:    bool = True
+
 
 @app.post("/api/config/arbitrator")
 async def add_arbitrator(arb: ArbitratorConfig):
-    cfg = load_config()
+    cfg  = load_config()
     arbs = cfg.get("arbitrators", [])
     if any(a["id"] == arb.id for a in arbs):
         raise HTTPException(409, f"Arbitrator '{arb.id}' already exists")
@@ -397,10 +388,11 @@ async def add_arbitrator(arb: ArbitratorConfig):
     _push_event("info", f"Arbitrator added: {arb.id} ({arb.host})", "ui")
     return {"ok": True, "arbitrator": arb.dict()}
 
+
 @app.delete("/api/config/arbitrator/{arb_id}")
 async def delete_arbitrator(arb_id: str):
-    cfg = load_config()
-    arbs = cfg.get("arbitrators", [])
+    cfg      = load_config()
+    arbs     = cfg.get("arbitrators", [])
     new_arbs = [a for a in arbs if a["id"] != arb_id]
     if len(new_arbs) == len(arbs):
         raise HTTPException(404, f"Arbitrator '{arb_id}' not found")
@@ -408,6 +400,7 @@ async def delete_arbitrator(arb_id: str):
     save_config(cfg)
     _push_event("info", f"Arbitrator removed: {arb_id}", "ui")
     return {"ok": True}
+
 
 @app.delete("/api/config/arbitrator")
 async def delete_all_arbitrators():
@@ -417,12 +410,12 @@ async def delete_all_arbitrators():
     _push_event("info", "All arbitrators removed", "ui")
     return {"ok": True}
 
+
 @app.put("/api/config/arbitrator/{arb_id}")
 async def update_arbitrator(arb_id: str, request: Request):
     body = await request.json()
     cfg  = load_config()
     arbs = cfg.get("arbitrators", [])
-    # Accept both list and single-object configs
     if isinstance(arbs, dict):
         arbs = [arbs]
     idx = next((i for i, a in enumerate(arbs) if a.get("id") == arb_id), None)
@@ -439,13 +432,17 @@ class DBCredentials(BaseModel):
     db_user: str
     db_pass: str
 
+
 @app.post("/api/config/db")
 async def update_db_credentials(creds: DBCredentials):
+    """Update DB credentials for all nodes.
+    FIX: saves as db_password (correct YAML field), not db_pass.
+    """
     cfg   = load_config()
     nodes = cfg.get("nodes", [])
     for node in nodes:
-        node["db_user"] = creds.db_user
-        node["db_pass"] = creds.db_pass
+        node["db_user"]     = creds.db_user
+        node["db_password"] = creds.db_pass   # FIX: was db_pass, must be db_password
     cfg["nodes"] = nodes
     save_config(cfg)
     _push_event("info", "DB credentials updated for all nodes", "ui")
@@ -456,16 +453,19 @@ async def update_db_credentials(creds: DBCredentials):
 async def reload_config_legacy():
     return {"ok": True, "msg": "Config reloaded (legacy endpoint)"}
 
+
 @app.post("/api/config/reload")
 async def reload_config():
     cfg = load_config()
     _push_event("info", "Config reloaded via API", "ui")
     return {"ok": True, "nodes": len(cfg.get("nodes", []))}
 
+
 @app.get("/api/prefs")
 async def get_prefs():
     cfg = load_config()
     return cfg.get("prefs", {})
+
 
 @app.post("/api/prefs")
 async def save_prefs(request: Request):
@@ -479,12 +479,11 @@ async def save_prefs(request: Request):
 @app.get("/api/garbd/{arb_id}/log")
 async def garbd_log(arb_id: str, lines: int = 100):
     """SSH: tail the garbd log from the arbitrator host."""
-    cfg  = load_config()
+    cfg = load_config()
     arbs = cfg.get("arbitrators", [])
     arb  = next((a for a in arbs if a["id"] == arb_id), None)
     if not arb:
         raise HTTPException(404, f"Arbitrator '{arb_id}' not found")
-
     cmd = (
         f"journalctl -u garbd --no-pager -n {lines} 2>/dev/null "
         f"|| tail -n {lines} /var/log/garbd.log 2>/dev/null "
@@ -500,15 +499,14 @@ async def garbd_log(arb_id: str, lines: int = 100):
 class WsrepRecoverRequest(BaseModel):
     node_id: str
 
+
 @app.post("/api/node/{node_id}/wsrep-recover")
 async def wsrep_recover(node_id: str):
     """SSH: run galera_recovery / mysqld --wsrep-recover on a single node."""
-    cfg   = load_config()
-    nodes = cfg.get("nodes", [])
-    node  = next((n for n in nodes if n["id"] == node_id), None)
+    cfg  = load_config()
+    node = next((n for n in cfg.get("nodes", []) if n["id"] == node_id), None)
     if not node:
         raise HTTPException(404, f"Node '{node_id}' not found")
-
     recover_cmd = (
         "galera_recovery 2>/dev/null "
         "|| mysqld --wsrep-recover 2>&1 | grep 'Recovered position' "
@@ -519,7 +517,7 @@ async def wsrep_recover(node_id: str):
         text = out or err
         import re
         m = re.search(r'Recovered position.*?(\d+:\d+)', text) or \
-            re.search(r'position:\s*(\S+)',               text)
+            re.search(r'position:\s*(\S+)', text)
         seqno_str = m.group(1) if m else "unknown"
         return {"ok": True, "node_id": node_id, "seqno": seqno_str, "raw": text}
     except Exception as e:
@@ -528,26 +526,18 @@ async def wsrep_recover(node_id: str):
 
 @app.post("/api/bootstrap")
 async def do_bootstrap(request: Request):
-    """Bootstrap the Galera cluster from the node with the highest seqno.
-
-    Pre-checks:
-    1. Systemd service check: MariaDB must NOT be active on any non-candidate node.
-    2. Candidate node must be determined (highest seqno or explicit node_id).
-    """
-    body = await request.json()
+    """Bootstrap the Galera cluster from the node with the highest seqno."""
+    body    = await request.json()
     node_id = body.get("node_id")
-
-    cfg   = load_config()
-    nodes = [n for n in cfg.get("nodes", []) if n.get("enabled")]
+    cfg     = load_config()
+    nodes   = [n for n in cfg.get("nodes", []) if n.get("enabled")]
     if not nodes:
         raise HTTPException(400, "No enabled nodes in config")
-
     candidate = next((n for n in nodes if n["id"] == node_id), None) if node_id else None
     if not candidate:
         raise HTTPException(404, f"Node '{node_id}' not found")
 
-    # ── Pre-check: ensure MariaDB is NOT running on other nodes ──────────
-    other_nodes = [n for n in nodes if n["id"] != node_id]
+    other_nodes  = [n for n in nodes if n["id"] != node_id]
     active_others = []
     for n in other_nodes:
         try:
@@ -555,16 +545,15 @@ async def do_bootstrap(request: Request):
             if out.strip() == "active":
                 active_others.append(n["id"])
         except Exception:
-            pass  # SSH failure — skip the check for this node
+            pass
 
     if active_others:
         raise HTTPException(
             409,
             f"Cannot bootstrap: MariaDB is still active on node(s): {', '.join(active_others)}. "
-            f"Stop MariaDB on those nodes first (systemctl stop mariadb)."
+            f"Stop MariaDB on those nodes first (systemctl stop mariadb).",
         )
 
-    # ── Bootstrap ────────────────────────────────────────────────────────
     try:
         [(ec, out, err)] = ssh_run(
             candidate,
@@ -573,10 +562,7 @@ async def do_bootstrap(request: Request):
         )
         ok  = ec == 0
         msg = out or err or ("Bootstrap started" if ok else "Bootstrap failed")
-        _push_event(
-            "info" if ok else "error",
-            f"Bootstrap on {node_id}: {msg}", "ui"
-        )
+        _push_event("info" if ok else "error", f"Bootstrap on {node_id}: {msg}", "ui")
         return {"ok": ok, "msg": msg, "node_id": node_id}
     except Exception as e:
         _push_event("error", f"Bootstrap on {node_id} failed: {e}", "ui")
@@ -586,9 +572,8 @@ async def do_bootstrap(request: Request):
 @app.post("/api/node/{node_id}/rejoin")
 async def do_rejoin(node_id: str):
     """SSH: stop + start MariaDB on the given node to re-join the cluster."""
-    cfg   = load_config()
-    nodes = cfg.get("nodes", [])
-    node  = next((n for n in nodes if n["id"] == node_id), None)
+    cfg  = load_config()
+    node = next((n for n in cfg.get("nodes", []) if n["id"] == node_id), None)
     if not node:
         raise HTTPException(404, f"Node '{node_id}' not found")
     try:
@@ -611,12 +596,12 @@ async def do_rejoin(node_id: str):
 @app.post("/api/node/{node_id}/sst-donor")
 async def force_sst_donor(node_id: str, request: Request):
     """SSH: set wsrep_sst_donor on the recipient node."""
-    body      = await request.json()
-    donor_id  = body.get("donor_id")
-    cfg       = load_config()
-    nodes     = cfg.get("nodes", [])
-    node      = next((n for n in nodes if n["id"] == node_id),  None)
-    donor     = next((n for n in nodes if n["id"] == donor_id), None) if donor_id else None
+    body     = await request.json()
+    donor_id = body.get("donor_id")
+    cfg      = load_config()
+    nodes    = cfg.get("nodes", [])
+    node     = next((n for n in nodes if n["id"] == node_id), None)
+    donor    = next((n for n in nodes if n["id"] == donor_id), None) if donor_id else None
     if not node:
         raise HTTPException(404, f"Node '{node_id}' not found")
     donor_host = donor.get("host", donor_id) if donor else donor_id
@@ -637,30 +622,24 @@ async def force_sst_donor(node_id: str, request: Request):
 @app.get("/api/node/{node_id}/sst-status")
 async def sst_status(node_id: str):
     """SSH + DB: monitor SST progress on the given node."""
-    cfg   = load_config()
-    nodes = cfg.get("nodes", [])
-    node  = next((n for n in nodes if n["id"] == node_id), None)
+    cfg  = load_config()
+    node = next((n for n in cfg.get("nodes", []) if n["id"] == node_id), None)
     if not node:
         raise HTTPException(404, f"Node '{node_id}' not found")
 
     result = {
-        "node_id":    node_id,
-        "state":      "unknown",
-        "recv_queue": 0,
-        "send_queue": 0,
-        "sst_method": None,
-        "progress_pct": 0,
-        "message":    "",
+        "node_id":     node_id,
+        "state":       "unknown",
+        "recv_queue":  0,
+        "send_queue":  0,
+        "sst_method":  None,
+        "progress_pct":0,
+        "message":     "",
     }
 
-    # DB query
+    # DB query — FIX: use _db_connect instead of hardcoded db_port/db_pass
     try:
-        import pymysql
-        conn = pymysql.connect(
-            host=node.get("host"), port=int(node.get("db_port", 3306)),
-            user=node.get("db_user", "root"), password=node.get("db_pass", ""),
-            connect_timeout=5,
-        )
+        conn = _db_connect(node, cfg)
         with conn.cursor() as cur:
             for var, key in [
                 ("wsrep_local_state_comment", "state"),
@@ -675,42 +654,38 @@ async def sst_status(node_id: str):
     except Exception:
         pass
 
-    # SSH: detect active SST process via shared ssh_run()
+    # SSH: detect active SST process
     try:
         [(_, proc_out, _)] = ssh_run(
             node,
             "pgrep -la rsync 2>/dev/null || pgrep -la mariabackup 2>/dev/null || echo none",
-            timeout=8
+            timeout=8,
         )
-        if "rsync" in proc_out:         result["sst_method"] = "rsync"
+        if "rsync"       in proc_out: result["sst_method"] = "rsync"
         elif "mariabackup" in proc_out: result["sst_method"] = "mariabackup"
     except Exception:
         pass
 
     state_progress = {
         "Synced": 100, "Joined": 95, "Donor/Desynced": 50,
-        "Joining": 15, "Open": 5, "unknown": 0
+        "Joining": 15, "Open": 5,   "unknown": 0,
     }
     result["progress_pct"] = state_progress.get(result["state"], 10)
-    result["message"] = f"{node_id}: {result['state']} (recv_queue={result['recv_queue']})"
+    result["message"]      = f"{node_id}: {result['state']} (recv_queue={result['recv_queue']})"
     return result
 
 
 @app.get("/api/node/{node_id}/processlist")
 async def get_processlist(node_id: str, min_time: int = 0):
     """DB: SHOW FULL PROCESSLIST filtered by minimum query time."""
-    cfg   = load_config()
-    nodes = cfg.get("nodes", [])
-    node  = next((n for n in nodes if n["id"] == node_id), None)
+    cfg  = load_config()
+    node = next((n for n in cfg.get("nodes", []) if n["id"] == node_id), None)
     if not node:
         raise HTTPException(404, f"Node '{node_id}' not found")
     try:
         import pymysql
-        conn = pymysql.connect(
-            host=node.get("host"), port=int(node.get("db_port", 3306)),
-            user=node.get("db_user", "root"), password=node.get("db_pass", ""),
-            connect_timeout=5, cursorclass=pymysql.cursors.DictCursor,
-        )
+        # FIX: use _db_connect with DictCursor
+        conn = _db_connect(node, cfg, cursorclass=pymysql.cursors.DictCursor)
         with conn.cursor() as cur:
             cur.execute("SHOW FULL PROCESSLIST")
             rows = cur.fetchall()
@@ -724,23 +699,18 @@ async def get_processlist(node_id: str, min_time: int = 0):
 
 @app.post("/api/node/{node_id}/kill-query")
 async def kill_query(node_id: str, request: Request):
-    """DB: KILL QUERY <id> on the given node."""
+    """DB: KILL QUERY on the given node."""
     body    = await request.json()
     proc_id = body.get("process_id")
     if not proc_id:
         raise HTTPException(400, "process_id required")
-    cfg   = load_config()
-    nodes = cfg.get("nodes", [])
-    node  = next((n for n in nodes if n["id"] == node_id), None)
+    cfg  = load_config()
+    node = next((n for n in cfg.get("nodes", []) if n["id"] == node_id), None)
     if not node:
         raise HTTPException(404, f"Node '{node_id}' not found")
     try:
-        import pymysql
-        conn = pymysql.connect(
-            host=node.get("host"), port=int(node.get("db_port", 3306)),
-            user=node.get("db_user", "root"), password=node.get("db_pass", ""),
-            connect_timeout=5,
-        )
+        # FIX: use _db_connect
+        conn = _db_connect(node, cfg)
         with conn.cursor() as cur:
             cur.execute(f"KILL QUERY {int(proc_id)}")
         conn.close()
@@ -752,15 +722,13 @@ async def kill_query(node_id: str, request: Request):
 
 @app.get("/api/config/compare-galera-cnf")
 async def compare_galera_cnf():
-    """SSH: read galera.cnf (or wsrep settings from my.cnf) from all nodes
-    and return a diff-friendly structure for the topology comparison UI.
-    """
+    """SSH: read galera.cnf from all nodes and return diff-friendly structure."""
     cfg   = load_config()
     nodes = [n for n in cfg.get("nodes", []) if n.get("enabled")]
     if not nodes:
         return {"ok": True, "nodes": [], "params": {}}
 
-    import concurrent.futures, re as _re
+    import concurrent.futures
 
     def _read_cnf(node):
         cmd = (
@@ -795,11 +763,11 @@ async def compare_galera_cnf():
         params_matrix[key] = {nid: results[nid]["params"].get(key, "") for nid in results}
 
     return {
-        "ok":     True,
-        "nodes":  [n["id"] for n in nodes],
-        "params": params_matrix,
-        "raw":    {nid: results[nid]["raw"]   for nid in results},
-        "errors": {nid: results[nid]["error"] for nid in results if results[nid]["error"]},
+        "ok":       True,
+        "nodes":    [n["id"] for n in nodes],
+        "params":   params_matrix,
+        "raw":      {nid: results[nid]["raw"]   for nid in results},
+        "errors":   {nid: results[nid]["error"] for nid in results if results[nid]["error"]},
         "cnf_path": "/etc/mysql/conf.d/galera.cnf",
     }
 
@@ -811,19 +779,18 @@ async def check_all():
     nodes = [n for n in cfg.get("nodes", []) if n.get("enabled")]
     mode  = cfg.get("settings", {}).get("use_mock", True)
 
-    results = []
+    results  = []
     warnings = []
     errors   = []
 
     if mode:
-        # Mock diagnostic results
         import random
         for node in nodes:
             nid = node["id"]
             results.append({
                 "node_id":        nid,
                 "status":         "ok",
-                "wsrep_connected": True,
+                "wsrep_connected":True,
                 "wsrep_ready":    True,
                 "wsrep_state":    "Synced",
                 "seqno":          random.randint(1000, 9999),
@@ -831,15 +798,12 @@ async def check_all():
                 "flow_control":   0.0,
             })
         return {
-            "ok":       True,
-            "mode":     "mock",
-            "nodes":    results,
-            "warnings": warnings,
-            "errors":   errors,
-            "summary":  f"Mock check: {len(nodes)} nodes OK",
+            "ok": True, "mode": "mock", "nodes": results,
+            "warnings": warnings, "errors": errors,
+            "summary": f"Mock check: {len(nodes)} nodes OK",
         }
 
-    # Real mode: DB + SSH checks
+    # Real mode — FIX: use _db_connect
     import concurrent.futures
     try:
         import pymysql
@@ -854,11 +818,7 @@ async def check_all():
     def _check_node(node):
         nid = node["id"]
         try:
-            conn = pymysql.connect(
-                host=node.get("host"), port=int(node.get("db_port", 3306)),
-                user=node.get("db_user", "root"), password=node.get("db_pass", ""),
-                connect_timeout=5,
-            )
+            conn     = _db_connect(node, cfg)
             row_data = {}
             with conn.cursor() as cur:
                 for var in wsrep_vars:
@@ -893,18 +853,13 @@ async def check_all():
 @app.get("/api/node/{node_id}/innodb-status")
 async def innodb_status(node_id: str):
     """DB: SHOW ENGINE INNODB STATUS — returns raw output for deadlock analysis."""
-    cfg   = load_config()
-    nodes = cfg.get("nodes", [])
-    node  = next((n for n in nodes if n["id"] == node_id), None)
+    cfg  = load_config()
+    node = next((n for n in cfg.get("nodes", []) if n["id"] == node_id), None)
     if not node:
         raise HTTPException(404, f"Node '{node_id}' not found")
     try:
-        import pymysql
-        conn = pymysql.connect(
-            host=node.get("host"), port=int(node.get("db_port", 3306)),
-            user=node.get("db_user", "root"), password=node.get("db_pass", ""),
-            connect_timeout=5,
-        )
+        # FIX: use _db_connect
+        conn = _db_connect(node, cfg)
         with conn.cursor() as cur:
             cur.execute("SHOW ENGINE INNODB STATUS")
             row = cur.fetchone()
@@ -915,27 +870,21 @@ async def innodb_status(node_id: str):
         raise HTTPException(500, str(e))
 
 
-# ── Module-level sentinel: used only during import/startup before lifespan runs.
-# After lifespan startup ``app.state.ws_manager`` is the authoritative instance.
+# ── Module-level sentinel ─────────────────────────────────────
 _ws_manager_sentinel = None
 
 
 @app.websocket("/ws/cluster")
 async def ws_cluster(websocket: WebSocket):
-    """WebSocket endpoint — streams cluster events to connected browsers.
-    Uses ``app.state.ws_manager``
-    (set during lifespan) instead of a module-level global.
-    """
+    """WebSocket endpoint — streams cluster events to connected browsers."""
     mgr = websocket.app.state.ws_manager
     await mgr.connect(websocket)
     try:
-        # Send buffered log on connect
         await websocket.send_json({
             "type":   "log_snapshot",
             "events": list(_event_log),
         })
         while True:
-            # Keep connection alive; actual pushes come from _push_event
             await asyncio.sleep(30)
             await websocket.send_json({"type": "ping"})
     except WebSocketDisconnect:
@@ -953,6 +902,7 @@ async def get_log(limit: int = 200, level: str = ""):
         entries = [e for e in entries if e["level"] == level.upper()]
     return {"events": entries[:limit], "total": len(_event_log)}
 
+
 @app.delete("/api/log")
 async def clear_log():
     _event_log.clear()
@@ -964,47 +914,41 @@ async def clear_log():
 @app.get("/api/version")
 async def api_version():
     """Return current local commit SHA and check GitHub for the latest commit.
-    Uses a 5-minute server-side cache so we don't hammer the GitHub API.
+    Uses a 5-minute server-side cache.
     """
-
     import subprocess, time, urllib.request, shutil
 
     _GIT = shutil.which("git") or r"C:\Program Files\Git\cmd\git.exe"
 
-    # ── local commit ──────────────────────────────────────────
     base_dir = Path(__file__).parent.parent
     try:
         local_sha = subprocess.check_output(
             [_GIT, "-C", str(base_dir), "rev-parse", "HEAD"],
-            stderr=subprocess.DEVNULL, timeout=5
+            stderr=subprocess.DEVNULL, timeout=5,
         ).decode().strip()
         local_short = local_sha[:7]
         branch = subprocess.check_output(
             [_GIT, "-C", str(base_dir), "branch", "--show-current"],
-            stderr=subprocess.DEVNULL, timeout=5
+            stderr=subprocess.DEVNULL, timeout=5,
         ).decode().strip() or "master"
     except Exception:
-        local_sha = "unknown"
+        local_sha   = "unknown"
         local_short = "unknown"
-        branch = "master"
+        branch      = "master"
 
-    # ── remote commit (cached 5 min) ──────────────────────────
     cache = getattr(api_version, "_cache", None)
     now   = time.time()
     if cache is None or (now - cache.get("ts", 0)) > 300:
-        remote_sha   = None
-        remote_short = None
-        error        = None
+        remote_sha = remote_short = error = None
         try:
             url = f"https://api.github.com/repos/Leg1onary/galera_orchestrator/commits/{branch}"
             req = urllib.request.Request(
                 url,
-                headers={"Accept": "application/vnd.github.v3+json",
-                         "User-Agent": "galera-orchestrator"},
+                headers={"Accept": "application/vnd.github.v3+json", "User-Agent": "galera-orchestrator"},
             )
             with urllib.request.urlopen(req, timeout=8) as resp:
                 import json as _json
-                data = _json.loads(resp.read())
+                data        = _json.loads(resp.read())
                 remote_sha   = data["sha"]
                 remote_short = remote_sha[:7]
         except Exception as e:
@@ -1019,15 +963,15 @@ async def api_version():
     up_to_date = (local_sha == remote_sha) if (local_sha != "unknown" and remote_sha) else None
 
     return {
-        "local_sha":       local_sha,
-        "local_short":     local_short,
-        "remote_sha":      remote_sha,
-        "remote_short":    remote_short,
-        "branch":          branch,
-        "up_to_date":      up_to_date,
+        "local_sha":        local_sha,
+        "local_short":      local_short,
+        "remote_sha":       remote_sha,
+        "remote_short":     remote_short,
+        "branch":           branch,
+        "up_to_date":       up_to_date,
         "update_available": (up_to_date is False),
-        "github_url":      "https://github.com/Leg1onary/galera_orchestrator",
-        "error":           error,
+        "github_url":       "https://github.com/Leg1onary/galera_orchestrator",
+        "error":            error,
     }
 
 
@@ -1035,7 +979,6 @@ async def api_version():
 @app.get("/api/diagnostics/system-health")
 async def diagnostics_system_health():
     """SSH: collect df/free/uptime for every node in parallel.
-    Returns per-node disk, memory, and load metrics with threshold flags.
     Thresholds: disk_warn=80%, disk_crit=90%; mem_warn=85%, mem_crit=95%.
     """
     import concurrent.futures, re as _re
@@ -1058,12 +1001,13 @@ async def diagnostics_system_health():
                 "uptime 2>/dev/null",
                 timeout=12,
             )
-            disk_raw  = results[0][1].strip().rstrip("%") if results[0][1] else None
-            mem_raw   = results[1][1].strip()             if results[1][1] else None
-            uptime_raw = results[2][1].strip()            if results[2][1] else None
+            disk_raw   = results[0][1].strip().rstrip("%") if results[0][1] else None
+            mem_raw    = results[1][1].strip()             if results[1][1] else None
+            uptime_raw = results[2][1].strip()             if results[2][1] else None
 
             disk_pct = int(disk_raw) if disk_raw and disk_raw.isdigit() else None
-            mem_total, mem_used = (None, None)
+
+            mem_total = mem_used = None
             if mem_raw:
                 parts = mem_raw.split()
                 if len(parts) >= 2:
@@ -1080,27 +1024,26 @@ async def diagnostics_system_health():
                     load_avg = float(m.group(1))
 
             return {
-                "node_id":   nid,
-                "ok":        True,
-                "disk_pct":  disk_pct,
-                "disk_status": (
+                "node_id":    nid,
+                "ok":         True,
+                "disk_pct":   disk_pct,
+                "disk_status":(
                     "crit" if (disk_pct and disk_pct >= DISK_CRIT) else
                     "warn" if (disk_pct and disk_pct >= DISK_WARN) else "ok"
                 ) if disk_pct is not None else "unknown",
-                "mem_pct":   mem_pct,
+                "mem_pct":      mem_pct,
                 "mem_used_mb":  mem_used,
                 "mem_total_mb": mem_total,
-                "mem_status": (
+                "mem_status":  (
                     "crit" if (mem_pct and mem_pct >= MEM_CRIT) else
                     "warn" if (mem_pct and mem_pct >= MEM_WARN) else "ok"
                 ) if mem_pct is not None else "unknown",
-                "load_avg":  load_avg,
-                "uptime":    uptime_raw,
+                "load_avg": load_avg,
+                "uptime":   uptime_raw,
             }
         except Exception as e:
             return {"node_id": nid, "ok": False, "error": str(e)}
 
-    import concurrent.futures
     with concurrent.futures.ThreadPoolExecutor(max_workers=8) as ex:
         node_results = list(ex.map(_collect, nodes))
 
@@ -1109,7 +1052,7 @@ async def diagnostics_system_health():
 
 @app.get("/api/node/{node_id}/sst-status")
 async def sst_status_2(node_id: str):
-    """Alias for /api/node/{node_id}/sst-status (duplicate kept for backwards compat)."""
+    """Alias for /api/node/{node_id}/sst-status (backwards compat)."""
     return await sst_status(node_id)
 
 
@@ -1125,14 +1068,8 @@ async def node_ping(node_id: str):
         raise HTTPException(404, f"Node '{node_id}' not found")
 
     if use_mock:
-        return {
-            "ok":         True,
-            "mock":       True,
-            "node_id":    node_id,
-            "reachable":  True,
-            "latency_ms": 2,
-            "service":    "active",
-        }
+        return {"ok": True, "mock": True, "node_id": node_id,
+                "reachable": True, "latency_ms": 2, "service": "active"}
 
     t0 = _t.monotonic()
     try:
@@ -1152,25 +1089,13 @@ async def node_ping(node_id: str):
         service_state = so.read().decode(errors="replace").strip()
         client.close()
         latency = int((_t.monotonic() - t0) * 1000)
-        return {
-            "ok":         True,
-            "mock":       False,
-            "node_id":    node_id,
-            "reachable":  True,
-            "latency_ms": latency,
-            "service":    service_state,
-        }
+        return {"ok": True, "mock": False, "node_id": node_id,
+                "reachable": True, "latency_ms": latency, "service": service_state}
     except Exception as e:
         latency = int((_t.monotonic() - t0) * 1000)
-        return {
-            "ok":         False,
-            "mock":       False,
-            "node_id":    node_id,
-            "reachable":  False,
-            "latency_ms": latency,
-            "service":    "unknown",
-            "error":      str(e),
-        }
+        return {"ok": False, "mock": False, "node_id": node_id,
+                "reachable": False, "latency_ms": latency,
+                "service": "unknown", "error": str(e)}
 
 
 # ── ENTRYPOINT ────────────────────────────────────────────────

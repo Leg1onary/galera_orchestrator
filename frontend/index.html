@@ -1635,7 +1635,7 @@
                         SHOW PROCESSLIST
                     </div>
                     <div style="display:flex;gap:var(--space-2);align-items:center">
-                        <select id="proclistNodeSelect" class="form-input" style="width:180px;height:32px;font-size:var(--text-sm)">
+                        <select id="proclistNodeSelect" class="form-input" style="width:250px;height:50px;font-size:var(--text-sm)">
                             <option value="">— выберите ноду —</option>
                         </select>
                         <button class="btn btn-primary btn-sm" onclick="Diag.loadProcesslist()" id="btnLoadProclist">
@@ -1659,10 +1659,10 @@
                         Журнал garbd (Arbitrator)
                     </div>
                     <div style="display:flex;gap:var(--space-2);align-items:center">
-                        <select id="garbdArbSelect" class="form-input" style="width:180px;height:32px;font-size:var(--text-sm)">
+                        <select id="garbdArbSelect" class="form-input" style="width:250px;height:50px;font-size:var(--text-sm)">
                             <option value="">— нет арбитраторов —</option>
                         </select>
-                        <select id="garbdLinesSelect" class="form-input" style="width:90px;height:32px;font-size:var(--text-sm)">
+                        <select id="garbdLinesSelect" class="form-input" style="width:150px;height:50px;font-size:var(--text-sm)">
                             <option value="20">20 строк</option>
                             <option value="50" selected>50 строк</option>
                             <option value="100">100 строк</option>
@@ -1749,7 +1749,7 @@
                         InnoDB Status — диагностика дедлоков
                     </div>
                     <div style="display:flex;gap:var(--space-2);align-items:center">
-                        <select id="innodbNodeSelect" class="form-input" style="height:32px;font-size:var(--text-sm);width:160px" onchange="Diag.innodbNodeChanged()">
+                        <select id="innodbNodeSelect" class="form-input" style="height:50px;font-size:var(--text-sm);width:250px" onchange="Diag.innodbNodeChanged()">
                             <option value="">— выберите ноду —</option>
                         </select>
                         <button class="btn btn-primary btn-sm" id="btnInnodbStatus" onclick="Diag.fetchInnodbStatus()" disabled>

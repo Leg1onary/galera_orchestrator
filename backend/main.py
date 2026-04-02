@@ -966,18 +966,21 @@ async def api_version():
     """Return current local commit SHA and check GitHub for the latest commit.
     Uses a 5-minute server-side cache so we don't hammer the GitHub API.
     """
-    import subprocess, time, urllib.request
+
+    import subprocess, time, urllib.request, shutil
+
+    _GIT = shutil.which("git") or r"C:\Program Files\Git\cmd\git.exe"
 
     # ── local commit ──────────────────────────────────────────
     base_dir = Path(__file__).parent.parent
     try:
         local_sha = subprocess.check_output(
-            ["git", "-C", str(base_dir), "rev-parse", "HEAD"],
+            [_GIT, "-C", str(base_dir), "rev-parse", "HEAD"],
             stderr=subprocess.DEVNULL, timeout=5
         ).decode().strip()
         local_short = local_sha[:7]
         branch = subprocess.check_output(
-            ["git", "-C", str(base_dir), "branch", "--show-current"],
+            [_GIT, "-C", str(base_dir), "branch", "--show-current"],
             stderr=subprocess.DEVNULL, timeout=5
         ).decode().strip() or "master"
     except Exception:

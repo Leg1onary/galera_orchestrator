@@ -3242,7 +3242,10 @@
             if (key === 'wsrep_cluster_status') return val === 'Primary' ? 'ok' : 'error';
             if (key === 'wsrep_local_state_comment') return val === 'Synced' ? 'ok' : (val === 'Donor/Desynced' ? 'warn' : 'error');
             if (key === 'wsrep_flow_control_paused') return parseFloat(val) > 0.05 ? 'warn' : 'ok';
-            if (key === 'wsrep_local_recv_queue') return parseInt(val) > 10 ? 'warn' : 'ok';
+            if (key === 'wsrep_local_recv_queue')    return parseInt(val) > 10 ? 'warn' : 'ok';
+            if (key === 'wsrep_local_send_queue')    return parseInt(val) > 10 ? 'warn' : 'ok';
+            if (key === 'wsrep_local_cert_failures') return parseInt(val) > 0  ? 'warn' : 'ok';
+            if (key === 'wsrep_bf_aborts')           return parseInt(val) > 0  ? 'warn' : 'ok';
             return '';
         }
 
@@ -3623,13 +3626,26 @@
                 }).join('') +
                 '</tr>';
 
+            // Переменные где расхождение между нодами = проблема
+            var _mustMatch = ['wsrep_cluster_size', 'wsrep_cluster_conf_id', 'wsrep_cluster_state_uuid'];
+
             var rows = keys.map(function(k) {
-                var cells = nodes.map(function(nd) {
+                // Межнодовая проверка: все значения должны совпадать
+                var allVals = nodes.map(function(nd) {
+                    return nd.metrics && nd.metrics[k] !== undefined ? String(nd.metrics[k]) : '—';
+                });
+                var mismatch = _mustMatch.indexOf(k) !== -1 &&
+                    allVals.some(function(v) { return v !== allVals[0]; });
+
+                var cells = nodes.map(function(nd, idx) {
                     var v = nd.metrics && nd.metrics[k] !== undefined ? nd.metrics[k] : '—';
-                    var c = metricClass(k, v);
-                    return '<td class="' + c + '">' + esc(String(v)) + '</td>';
+                    var c = mismatch ? 'error' : metricClass(k, v);
+                    var title = mismatch ? ' title=\"⚠ Расхождение между нодами!\"' : '';
+                    return '<td class=\"' + c + '\"' + title + '>' + esc(String(v)) + '</td>';
                 }).join('');
-                return '<tr><td class="mono">' + esc(k) + '</td>' + cells + '</tr>';
+
+                var rowClass = mismatch ? ' style="background:rgba(var(--color-danger-rgb,220,53,69),.08)"' : '';
+                return '<tr' + rowClass + '><td class=\"mono\">' + esc(k) + '</td>' + cells + '</tr>';
             }).join('');
 
             tbl.innerHTML = '<table><thead>' + thead + '</thead><tbody>' + deltaRow + rows + '</tbody></table>';

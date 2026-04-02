@@ -47,20 +47,16 @@ def ssh_run(node: dict, *cmds: str, timeout: int = 30) -> list:
 
 # ── Unified DB connection helper ─────────────────────────────
 def _db_connect(node: dict, cfg: dict, **kwargs):
-    """Unified DB connection using correct field names from nodes.yaml.
-
-    nodes.yaml stores: port (not db_port), db_password (not db_pass).
-    Falls back to global cfg[db] block for user/password if not set per-node.
-    """
     import pymysql
     db_cfg = cfg.get("db", {})
     host   = node.get("host")
     port   = int(node.get("port") or node.get("db_port") or 3306)
     user   = node.get("db_user")     or db_cfg.get("user",     "root")
     passwd = node.get("db_password") or node.get("db_pass") or db_cfg.get("password", "")
+    kwargs.setdefault("connect_timeout", 5)   # ← дефолт, не перебивает явный аргумент
     return pymysql.connect(
         host=host, port=port, user=user, password=passwd,
-        connect_timeout=5, **kwargs
+        **kwargs
     )
 
 
@@ -485,8 +481,9 @@ async def garbd_log(arb_id: str, lines: int = 100):
     if not arb:
         raise HTTPException(404, f"Arbitrator '{arb_id}' not found")
     cmd = (
-        f"journalctl -u garbd --no-pager -n {lines} 2>/dev/null "
-        f"|| tail -n {lines} /var/log/garbd.log 2>/dev/null "
+        f"timeout 10 journalctl -u garbd --no-pager -n {lines} 2>/dev/null "
+        f"|| timeout 10 tail -n {lines} /var/log/garbd.log 2>/dev/null "
+        f"|| timeout 10 journalctl -u garbd.service --no-pager -n {lines} 2>/dev/null "
         f"|| echo 'Log not found'"
     )
     try:
@@ -692,7 +689,7 @@ async def get_processlist(node_id: str, min_time: int = 0):
         conn.close()
         if min_time:
             rows = [r for r in rows if (r.get("Time") or 0) >= min_time]
-        return {"ok": True, "node_id": node_id, "processes": rows}
+        return {"ok": True, "node_id": node_id, "processes": rows, "total": len(rows),}
     except Exception as e:
         raise HTTPException(500, str(e))
 
@@ -781,8 +778,15 @@ async def compare_galera_cnf():
         all_keys.update(v["params"])
 
     params_matrix = {}
+    diff = {}
     for key in sorted(all_keys):
         params_matrix[key] = {nid: results[nid]["params"].get(key, "") for nid in results}
+        values = {nid: results[nid]["params"].get(key, "") for nid in results}
+        unique_vals = set(v for v in values.values() if v)
+        diff[key] = {
+            "match":  len(unique_vals) <= 1,
+            "values": values,
+        }
 
     # details — per-node статус для фронтенда (_renderCnfCompare)
     details = {
@@ -804,6 +808,7 @@ async def compare_galera_cnf():
         "ok":       True,
         "nodes":    [n["id"] for n in nodes],
         "params":   params_matrix,
+        "diff":     diff,
         "raw":      {nid: results[nid]["raw"]   for nid in results},
         "errors":   {nid: results[nid]["error"] for nid in results if results[nid]["error"]},
         "cnf_path": common_cnf_path,
@@ -1035,53 +1040,75 @@ async def diagnostics_system_health():
         try:
             results = ssh_run(
                 node,
-                "df -h / --output=pcent 2>/dev/null | tail -1",
+                # /mysql или /var/lib/mysql — главный data-диск
+                "df -h /var/lib/mysql 2>/dev/null | tail -1 || df -h / 2>/dev/null | tail -1",
+                # корневой раздел
+                "df -h / 2>/dev/null | tail -1",
+                # память
                 "free -m 2>/dev/null | awk '/^Mem/{print $2, $3}'",
+                # uptime с load avg
                 "uptime 2>/dev/null",
                 timeout=12,
             )
-            disk_raw   = results[0][1].strip().rstrip("%") if results[0][1] else None
-            mem_raw    = results[1][1].strip()             if results[1][1] else None
-            uptime_raw = results[2][1].strip()             if results[2][1] else None
+            def _parse_df(line):
+                """Parse 'df -h' line: Filesystem Size Used Avail Use% Mountpoint"""
+                if not line:
+                    return {}
+                parts = line.split()
+                if len(parts) < 5:
+                    return {}
+                try:
+                    pct = int(parts[4].rstrip("%"))
+                except (ValueError, IndexError):
+                    pct = None
+                return {"total": parts[1], "used": parts[2], "avail": parts[3], "used_pct": pct}
 
-            disk_pct = int(disk_raw) if disk_raw and disk_raw.isdigit() else None
+            disk_data = _parse_df(results[0][1].strip())
+            disk_root = _parse_df(results[1][1].strip())
 
-            mem_total = mem_used = None
+            mem_raw = results[2][1].strip() if results[2][1] else ""
+            mem_total = mem_used = mem_pct = None
             if mem_raw:
                 parts = mem_raw.split()
                 if len(parts) >= 2:
                     try:
-                        mem_total = int(parts[0]); mem_used = int(parts[1])
+                        mem_total = int(parts[0])
+                        mem_used  = int(parts[1])
+                        mem_pct   = round(mem_used / mem_total * 100) if mem_total else None
                     except ValueError:
                         pass
-            mem_pct = round(mem_used / mem_total * 100) if mem_total and mem_used else None
 
-            load_avg = None
+            uptime_raw = results[3][1].strip() if results[3][1] else None
+            load_avg = {}
             if uptime_raw:
-                m = _re.search(r'load average[s]?:\s*([\d.]+)', uptime_raw)
+                m = _re.search(r'load average[s]?:\s*([\d.]+)[,\s]+([\d.]+)[,\s]+([\d.]+)', uptime_raw)
                 if m:
-                    load_avg = float(m.group(1))
+                    load_avg = {"1m": float(m.group(1)), "5m": float(m.group(2)), "15m": float(m.group(3))}
+
+            disk_warn = disk_data.get("used_pct", 0) or 0
+            disk_crit_flag = disk_warn >= DISK_CRIT
+            disk_warn_flag = disk_warn >= DISK_WARN
+
+            mem_crit_flag = (mem_pct or 0) >= MEM_CRIT
+            mem_warn_flag = (mem_pct or 0) >= MEM_WARN
 
             return {
-                "node_id":    nid,
-                "ok":         True,
-                "disk_pct":   disk_pct,
-                "disk_status":(
-                    "crit" if (disk_pct and disk_pct >= DISK_CRIT) else
-                    "warn" if (disk_pct and disk_pct >= DISK_WARN) else "ok"
-                ) if disk_pct is not None else "unknown",
-                "mem_pct":      mem_pct,
-                "mem_used_mb":  mem_used,
-                "mem_total_mb": mem_total,
-                "mem_status":  (
-                    "crit" if (mem_pct and mem_pct >= MEM_CRIT) else
-                    "warn" if (mem_pct and mem_pct >= MEM_WARN) else "ok"
-                ) if mem_pct is not None else "unknown",
-                "load_avg": load_avg,
-                "uptime":   uptime_raw,
+                "node_id":   nid,
+                "name":      node.get("name", nid),
+                "host":      node.get("host", ""),
+                "ok":        True,
+                "warn":      disk_warn_flag or mem_warn_flag,
+                "crit":      disk_crit_flag or mem_crit_flag,
+                "disk_data": disk_data,
+                "disk_root": disk_root,
+                "memory":    {"total": f"{mem_total}M", "used": f"{mem_used}M", "used_pct": mem_pct} if mem_total else {},
+                "load_avg":  load_avg,
+                "uptime":    uptime_raw,
             }
         except Exception as e:
-            return {"node_id": nid, "ok": False, "error": str(e)}
+            return {"node_id": nid, "name": node.get("name", nid), "host": node.get("host",""),
+                    "ok": False, "warn": False, "crit": False, "error": str(e),
+                    "disk_data": {}, "disk_root": {}, "memory": {}, "load_avg": {}, "uptime": None}
 
     with concurrent.futures.ThreadPoolExecutor(max_workers=8) as ex:
         node_results = list(ex.map(_collect, nodes))

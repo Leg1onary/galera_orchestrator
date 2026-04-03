@@ -219,6 +219,8 @@
             position: sticky;
             top: var(--header-h);
             height: calc(100dvh - var(--header-h));
+            display: flex;
+            flex-direction: column;
         }
 
         .nav-section-label {
@@ -255,6 +257,160 @@
         .nav-item.active { background: var(--primary-dim); color: var(--primary); }
         .nav-item svg { flex-shrink: 0; opacity: 0.7; }
         .nav-item.active svg { opacity: 1; }
+
+        /* ---- SIDEBAR FOOTER (status + version) ---- */
+        .sidebar-footer {
+            margin-top: auto;
+            padding-top: var(--space-4);
+            border-top: 1px solid var(--border);
+        }
+        .sidebar-cluster-status {
+            display: flex;
+            align-items: center;
+            gap: var(--space-3);
+            padding: var(--space-3) var(--space-4);
+            border-radius: var(--radius-md);
+            background: var(--surface-2);
+            margin-bottom: var(--space-3);
+            cursor: default;
+            transition: background var(--transition);
+        }
+        .sidebar-status-pulse {
+            width: 10px; height: 10px;
+            border-radius: 50%;
+            flex-shrink: 0;
+            position: relative;
+        }
+        .sidebar-status-pulse::after {
+            content: '';
+            position: absolute;
+            inset: -3px;
+            border-radius: 50%;
+            animation: sidebar-pulse 2s ease-in-out infinite;
+        }
+        .sidebar-status-pulse.ok    { background: var(--success); }
+        .sidebar-status-pulse.ok::after    { background: var(--success); }
+        .sidebar-status-pulse.warn  { background: var(--warning); }
+        .sidebar-status-pulse.warn::after  { background: var(--warning); }
+        .sidebar-status-pulse.error { background: var(--error); }
+        .sidebar-status-pulse.error::after { background: var(--error); }
+        .sidebar-status-pulse.unknown { background: var(--text-faint); }
+        .sidebar-status-pulse.unknown::after { display:none; }
+        @keyframes sidebar-pulse {
+            0%, 100% { opacity: 0.5; transform: scale(1); }
+            50%       { opacity: 0;   transform: scale(2.2); }
+        }
+        .sidebar-status-info {
+            min-width: 0;
+            flex: 1;
+        }
+        .sidebar-status-label {
+            font-size: var(--text-xs);
+            font-weight: 700;
+            line-height: 1.2;
+            white-space: nowrap;
+            overflow: hidden;
+            text-overflow: ellipsis;
+        }
+        .sidebar-status-label.ok    { color: var(--success); }
+        .sidebar-status-label.warn  { color: var(--warning); }
+        .sidebar-status-label.error { color: var(--error); }
+        .sidebar-status-label.unknown { color: var(--text-faint); }
+        .sidebar-status-sub {
+            font-size: 0.70rem;
+            color: var(--text-muted);
+            white-space: nowrap;
+            overflow: hidden;
+            text-overflow: ellipsis;
+        }
+        .sidebar-version-row {
+            display: flex;
+            align-items: center;
+            gap: var(--space-2);
+            padding: var(--space-2) var(--space-4);
+            font-size: 0.70rem;
+            color: var(--text-faint);
+        }
+        .sidebar-version-sha {
+            font-family: var(--font-mono);
+            color: var(--text-muted);
+            font-size: 0.68rem;
+        }
+        .sidebar-mode-badge {
+            display: inline-block;
+            padding: 1px 6px;
+            border-radius: var(--radius-full);
+            font-size: 0.65rem;
+            font-weight: 700;
+            letter-spacing: 0.04em;
+        }
+        .sidebar-mode-badge.mock {
+            background: rgba(245,158,11,0.15);
+            color: var(--warning);
+        }
+        .sidebar-mode-badge.real {
+            background: rgba(34,197,94,0.15);
+            color: var(--success);
+        }
+
+        /* ---- WSREP TOOLTIP ---- */
+        .wsrep-hint {
+            display: inline-flex;
+            align-items: center;
+            justify-content: center;
+            width: 14px; height: 14px;
+            border-radius: 50%;
+            background: var(--surface-3);
+            border: 1px solid var(--border-strong);
+            font-size: 9px;
+            font-weight: 700;
+            color: var(--text-faint);
+            cursor: help;
+            margin-left: 4px;
+            vertical-align: middle;
+            position: relative;
+            flex-shrink: 0;
+        }
+        .wsrep-hint:hover {
+            background: var(--primary-dim);
+            border-color: var(--primary);
+            color: var(--primary);
+        }
+        .wsrep-hint::after {
+            content: attr(data-tip);
+            position: absolute;
+            bottom: calc(100% + 6px);
+            left: 50%;
+            transform: translateX(-50%);
+            min-width: 220px;
+            max-width: 300px;
+            background: var(--surface-3);
+            color: var(--text);
+            font-size: 0.70rem;
+            font-weight: 400;
+            line-height: 1.5;
+            padding: 7px 10px;
+            border-radius: var(--radius-md);
+            border: 1px solid var(--border-strong);
+            box-shadow: var(--shadow-md);
+            white-space: normal;
+            word-break: normal;
+            z-index: 500;
+            pointer-events: none;
+            opacity: 0;
+            transition: opacity 120ms ease;
+            font-family: var(--font-body);
+        }
+        .wsrep-hint:hover::after {
+            opacity: 1;
+        }
+        /* На мобильных tooltip вправо от иконки */
+        @media (max-width: 900px) {
+            .wsrep-hint::after {
+                left: 0;
+                transform: none;
+            }
+        }
 
         /* ---- MAIN CONTENT ---- */
         .app-main {
@@ -1243,6 +1399,29 @@
             <svg width="18" height="18" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2"><path d="M14 2H6a2 2 0 0 0-2 2v16a2 2 0 0 0 2 2h12a2 2 0 0 0 2-2V8z"/><polyline points="14 2 14 8 20 8"/><line x1="16" y1="13" x2="8" y2="13"/><line x1="16" y1="17" x2="8" y2="17"/></svg>
             Документация
         </button>
+
+        <!-- ── SIDEBAR FOOTER: cluster status + version ── -->
+        <div style="flex:1"></div>
+        <div class="sidebar-footer">
+            <!-- Cluster status card -->
+            <div class="sidebar-cluster-status" id="sidebarStatus" title="Статус кластера">
+                <span class="sidebar-status-pulse unknown" id="sidebarStatusPulse"></span>
+                <div class="sidebar-status-info">
+                    <div class="sidebar-status-label unknown" id="sidebarStatusLabel">Инициализация…</div>
+                    <div class="sidebar-status-sub" id="sidebarStatusSub">ожидание данных</div>
+                </div>
+            </div>
+            <!-- Version + mode row -->
+            <div class="sidebar-version-row">
+                <span id="sidebarModeBadge" class="sidebar-mode-badge mock">MOCK</span>
+                <span style="flex:1"></span>
+                <span class="sidebar-version-sha" id="sidebarVersionSha">v…</span>
+                <a href="https://github.com/Leg1onary/galera_orchestrator" target="_blank" rel="noopener noreferrer"
+                   title="GitHub" style="color:var(--text-faint);line-height:0;transition:color var(--transition)" onmouseover="this.style.color='var(--text)'" onmouseout="this.style.color='var(--text-faint)'">
+                    <svg width="13" height="13" viewBox="0 0 24 24" fill="currentColor"><path d="M12 0C5.37 0 0 5.37 0 12c0 5.31 3.435 9.795 8.205 11.385.6.105.825-.255.825-.57 0-.285-.015-1.23-.015-2.235-3.015.555-3.795-.735-4.035-1.41-.135-.345-.72-1.41-1.23-1.695-.42-.225-1.02-.78-.015-.795.945-.015 1.62.87 1.845 1.23 1.08 1.815 2.805 1.305 3.495.99.105-.78.42-1.305.765-1.605-2.67-.3-5.46-1.335-5.46-5.925 0-1.305.465-2.385 1.23-3.225-.12-.3-.54-1.53.12-3.18 0 0 1.005-.315 3.3 1.23.96-.27 1.98-.405 3-.405s2.04.135 3 .405c2.295-1.56 3.3-1.23 3.3-1.23.66 1.65.24 2.88.12 3.18.765.84 1.23 1.905 1.23 3.225 0 4.605-2.805 5.625-5.475 5.925.435.375.81 1.095.81 2.22 0 1.605-.015 2.895-.015 3.3 0 .315.225.69.825.57A12.02 12.02 0 0 0 24 12c0-6.63-5.37-12-12-12z"/></svg>
+                </a>
+            </div>
+        </div>
     </nav>
 
     <!-- MAIN -->
@@ -2798,6 +2977,25 @@
         var LS_MODE = 'galera_data_mode';
         var LS_ENV  = 'galera_env';
 
+        // Hints / tooltips for wsrep status variables shown in Topology table
+        var WSREP_HINTS = {
+            'wsrep_cluster_status':      'Primary — кворум есть, запись разрешена. non-Primary — кластер разделён или потерял кворум, запись блокируется.',
+            'wsrep_local_state_comment': 'Synced — нода полностью синхронизирована. Donor/Desynced — отдаёт SST-снимок. Joining — получает данные. Joined — синхронизируется через IST.',
+            'wsrep_cluster_size':        'Количество нод в кластере. Должно совпадать на всех нодах. Если меньше ожидаемого — нода выпала.',
+            'wsrep_flow_control_paused': 'Доля времени (0.0–1.0) когда репликация была приостановлена из-за перегрузки. >0.1 — серьёзная проблема производительности.',
+            'wsrep_local_recv_queue':    'Очередь входящих транзакций ожидающих применения. >0 в течение длительного времени — нода не справляется с нагрузкой.',
+            'wsrep_local_send_queue':    'Очередь исходящих транзакций ожидающих отправки в кластер. >0 — проблема сети или перегрузка.',
+            'wsrep_cert_deps_distance':  'Среднее расстояние между зависимыми транзакциями — показывает потенциал параллельного применения. Чем выше, тем лучше.',
+            'wsrep_local_commits':       'Число транзакций подтверждённых на этой ноде с момента запуска.',
+            'wsrep_local_cert_failures': 'Число транзакций отклонённых из-за конфликтов сертификации. >0 — конкурирующая запись на разных нодах.',
+            'wsrep_bf_aborts':           'Число транзакций прерванных механизмом Brute Force Abortion при конфликте репликации. Ненулевое значение — норма при высокой нагрузке.',
+            'wsrep_cluster_conf_id':     'Номер конфигурации кластера — увеличивается при каждом изменении состава нод. Должен совпадать на всех нодах.',
+            'wsrep_cluster_state_uuid':  'UUID кластера. Должен совпадать на всех нодах. Расхождение означает Split-Brain.',
+            'wsrep_connected':           'ON — нода подключена к кластеру. OFF — нода изолирована.',
+            'wsrep_ready':               'ON — нода готова обрабатывать запросы. OFF — нода в процессе синхронизации или восстановления.',
+            'wsrep_apply_oooe':          'Out-Of-Order Execution ratio — доля транзакций применённых не по порядку. Высокое значение = хорошая параллельность.'
+        };
+
         // localStorage helpers (inline здесь, чтобы были доступны сразу)
         function lsGet(key, def) {
             try { var v = localStorage.getItem(key); return v !== null ? v : def; } catch(e) { return def; }
@@ -3645,7 +3843,8 @@
                 }).join('');
 
                 var rowClass = mismatch ? ' style="background:rgba(var(--color-danger-rgb,220,53,69),.08)"' : '';
-                return '<tr' + rowClass + '><td class=\"mono\">' + esc(k) + '</td>' + cells + '</tr>';
+                var hint = WSREP_HINTS[k] ? '<span class="wsrep-hint" data-tip="' + WSREP_HINTS[k].replace(/"/g, '&quot;') + '">?</span>' : '';
+                return '<tr' + rowClass + '><td class=\"mono\" style=\"white-space:nowrap\">' + esc(k) + hint + '</td>' + cells + '</tr>';
             }).join('');
 
             tbl.innerHTML = '<table><thead>' + thead + '</thead><tbody>' + deltaRow + rows + '</tbody></table>';
@@ -3676,6 +3875,69 @@
                 var wsLabel = (WsManager && WsManager.isConnected()) ? ' [WS]' : '';
                 lu.textContent = _lastUpdateStr + wsLabel;
             }
+            // Обновляем sidebar статус каждый раз вместе с header
+            updateSidebarStatus();
+        }
+
+        // ---- SIDEBAR STATUS + VERSION ----
+        function updateSidebarStatus() {
+            var pulse = document.getElementById('sidebarStatusPulse');
+            var label = document.getElementById('sidebarStatusLabel');
+            var sub   = document.getElementById('sidebarStatusSub');
+            if (!pulse || !label || !sub) return;
+
+            if (!clusterData.nodes || clusterData.nodes.length === 0) {
+                pulse.className = 'sidebar-status-pulse warn';
+                label.className = 'sidebar-status-label warn';
+                label.textContent = 'Нет нод';
+                sub.textContent = 'добавьте ноды в Настройки';
+                return;
+            }
+
+            var totalNodes = clusterData.nodes.length;
+            var syncedNodes = clusterData.nodes.filter(function(n) { return n.state === 'Synced'; }).length;
+            var offlineNodes = clusterData.nodes.filter(function(n) { return n.online === false || n.state === 'Offline'; }).length;
+            var activeM = clusterData.nodes.filter(function(n) { return n && n.metrics; });
+            var isPrimary = activeM.length > 0 && activeM[0].metrics.wsrep_cluster_status === 'Primary';
+            var hasFlowControl = activeM.some(function(n) {
+                return parseFloat(n.metrics.wsrep_flow_control_paused || 0) > 0.05;
+            });
+
+            var statusClass, statusText, subText;
+
+            if (!isPrimary || offlineNodes === totalNodes) {
+                statusClass = 'error';
+                statusText  = 'non-Primary';
+                subText     = offlineNodes + ' / ' + totalNodes + ' нод недоступны';
+            } else if (offlineNodes > 0) {
+                statusClass = 'error';
+                statusText  = 'Нода упала';
+                subText     = offlineNodes + ' / ' + totalNodes + ' offline';
+            } else if (syncedNodes < totalNodes) {
+                statusClass = 'warn';
+                statusText  = 'Синхронизация…';
+                subText     = syncedNodes + ' / ' + totalNodes + ' Synced';
+            } else if (hasFlowControl) {
+                statusClass = 'warn';
+                statusText  = 'Flow Control';
+                subText     = syncedNodes + ' / ' + totalNodes + ' · FC active';
+            } else {
+                statusClass = 'ok';
+                statusText  = 'Primary · OK';
+                subText     = syncedNodes + ' / ' + totalNodes + ' Synced';
+            }
+
+            pulse.className = 'sidebar-status-pulse ' + statusClass;
+            label.className = 'sidebar-status-label ' + statusClass;
+            label.textContent = statusText;
+            sub.textContent   = subText;
+        }
+
+        function updateSidebarMode() {
+            var badge = document.getElementById('sidebarModeBadge');
+            if (!badge) return;
+            badge.className = 'sidebar-mode-badge ' + _dataMode;
+            badge.textContent = _dataMode.toUpperCase();
         }
 
         // ---- BOOTSTRAP CANDIDATES ----
@@ -4041,6 +4303,7 @@
 
             addLog('INFO', 'Режим: ' + (mode === 'mock' ? 'MOCK (симуляция)' : 'REAL (backend API)'));
             toast(mode === 'real' ? 'info' : 'success', 'Режим: ' + (mode === 'mock' ? 'Mock' : 'Real'));
+            updateSidebarMode();
 
             // Синх в nodes.yaml (побочно, secondary)
             var apiBase = getApiBase();
@@ -5528,6 +5791,8 @@
 
         addLog('OK',   'Galera Orchestrator запущен');
         addLog('INFO', 'Режим: ' + _dataMode.toUpperCase() + ' · Контур: ' + _env.toUpperCase());
+        updateSidebarMode();
+        updateSidebarStatus();
         renderAll();
 
         function pollSstProgress() {
@@ -6854,6 +7119,12 @@
             text.textContent = local;
             badge.title = 'Коммит: ' + (data.local_sha || local) +
                 (remote ? ' | GitHub: ' + (data.remote_sha || remote) : '');
+            // Обновляем SHA в sidebar footer
+            var sidebarSha = document.getElementById('sidebarVersionSha');
+            if (sidebarSha) {
+                sidebarSha.textContent = local;
+                sidebarSha.title = 'SHA: ' + (data.local_sha || local);
+            }
 
             if (upToDate === true) {
                 dot.className = 'version-dot';          // зелёный

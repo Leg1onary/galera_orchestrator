@@ -1,12 +1,19 @@
-import asyncio, concurrent.futures, json, logging, os, re, subprocess, time as _time
+import asyncio, concurrent.futures, json, logging, os, re, subprocess, time as _time, warnings
 from collections import deque, defaultdict
 from contextlib import asynccontextmanager
 from datetime import datetime
 from pathlib import Path
 
+# paramiko uses TripleDES internally; suppress the deprecation noise until
+# paramiko ships a fix — it is a third-party issue, not ours.
+warnings.filterwarnings(
+    "ignore",
+    message="TripleDES has been moved",
+    category=DeprecationWarning,
+)
+
 from fastapi import FastAPI, WebSocket, WebSocketDisconnect, HTTPException, Request
 from fastapi.responses import HTMLResponse, FileResponse
-from fastapi.staticfiles import StaticFiles
 from pydantic import BaseModel
 from typing import Optional
 
@@ -88,9 +95,10 @@ def _db_connect(node: dict, cfg: dict, **kwargs):
 
 
 # ── Persistent event log ─────────────────────────────────────────
-_LOG_DIR = Path(__file__).parent.parent / "logs"
-_LOG_DIR.mkdir(parents=True, exist_ok=True)
+_LOG_DIR  = Path(__file__).parent.parent / "logs"
 _LOG_FILE = _LOG_DIR / "events.log"
+# Note: _LOG_DIR is created lazily inside _write_log_entry to avoid
+# triggering watchfiles reload on startup.
 
 _event_log: deque = deque(maxlen=500)
 
@@ -128,6 +136,7 @@ def _push_event(level: str, msg: str, source: str = "system"):
 
 def _write_log_entry(line: str):
     try:
+        _LOG_DIR.mkdir(parents=True, exist_ok=True)
         with open(_LOG_FILE, "a") as fh:
             fh.write(line + "\n")
     except Exception:
@@ -225,9 +234,8 @@ async def lifespan(app: FastAPI):
 app = FastAPI(title="Galera Orchestrator", lifespan=lifespan)
 
 FRONTEND = Path(__file__).parent.parent / "frontend"
-ASSETS   = FRONTEND / "assets"
-ASSETS.mkdir(parents=True, exist_ok=True)
-app.mount("/assets", StaticFiles(directory=str(ASSETS)), name="assets")
+# /assets mount removed — index.html is a self-contained SPA,
+# no static assets are served from the backend.
 
 
 @app.get("/", response_class=HTMLResponse)

@@ -2999,18 +2999,18 @@
         var themeIcon = document.getElementById('themeIcon');
         var themeBtn  = document.getElementById('themeToggle');
 
-        // Читаем сохранённую тему из sessionStorage (работает в большинстве случаев)
-        // Fallback — системная prefers-color-scheme
+        // Читаем сохранённую тему из localStorage (персистентное хранилище между сессиями)
+        // Fallback — dark (проект dark-by-default, не system preference)
         var _savedTheme = null;
-        try { _savedTheme = sessionStorage.getItem('galera_theme'); } catch(e) {}
+        try { _savedTheme = localStorage.getItem('galera_theme'); } catch(e) {}
         var isDark = _savedTheme !== null
             ? _savedTheme === 'dark'
-            : window.matchMedia('(prefers-color-scheme: dark)').matches;
+            : true; // dark по умолчанию, если тема не сохранена
 
         function setTheme(dark) {
             isDark = dark;
             themeEl.setAttribute('data-theme', dark ? 'dark' : 'light');
-            try { sessionStorage.setItem('galera_theme', dark ? 'dark' : 'light'); } catch(e) {}
+            try { localStorage.setItem('galera_theme', dark ? 'dark' : 'light'); } catch(e) {}
             themeIcon.innerHTML = dark
                 ? '<path d="M21 12.79A9 9 0 1 1 11.21 3 7 7 0 0 0 21 12.79z"/>'
                 : '<circle cx="12" cy="12" r="5"/><path d="M12 1v2M12 21v2M4.22 4.22l1.42 1.42M18.36 18.36l1.42 1.42M1 12h2M21 12h2M4.22 19.78l1.42-1.42M18.36 5.64l1.42-1.42"/>';
@@ -5071,23 +5071,25 @@
             },
 
             pingNode: function(nodeId) {
-                var badge = document.getElementById('ping-' + nodeId);
-                if (badge) { badge.className = 'node-ping-badge ping-wait'; badge.textContent = '⏳ ping...'; }
+                // Используем querySelectorAll чтобы обновить badge на всех страницах сразу
+                // (Обзор и Ноды рендерят одинаковые карточки с одинаковым id="ping-{nodeId}")
+                var badges = document.querySelectorAll('[id="ping-' + nodeId + '"]');
+                badges.forEach(function(b) { b.className = 'node-ping-badge ping-wait'; b.textContent = '⏳ ping...'; });
                 var apiBase = getApiBase();
                 fetch(apiBase + '/api/node/' + nodeId + '/ping')
                     .then(function(r) { return r.json(); })
                     .then(function(res) {
-                        if (badge) {
-                            badge.className = 'node-ping-badge ' + (res.reachable ? 'ping-ok' : 'ping-fail');
-                            badge.textContent = res.reachable ? ('✓ ' + res.latency_ms + 'ms · ' + res.service) : '✗ unreachable';
-                        }
+                        badges.forEach(function(b) {
+                            b.className = 'node-ping-badge ' + (res.reachable ? 'ping-ok' : 'ping-fail');
+                            b.textContent = res.reachable ? ('✓ ' + res.latency_ms + 'ms · ' + res.service) : '✗ unreachable';
+                        });
                         addLog(res.reachable ? 'INFO' : 'ERROR',
                             nodeId + ': ping → ' + (res.reachable
                                 ? res.latency_ms + 'ms, svc=' + res.service
                                 : 'UNREACHABLE' + (res.error ? ' — ' + res.error : '')));
                     })
                     .catch(function(e) {
-                        if (badge) { badge.className = 'node-ping-badge ping-fail'; badge.textContent = '✗ error'; }
+                        badges.forEach(function(b) { b.className = 'node-ping-badge ping-fail'; b.textContent = '✗ error'; });
                         addLog('ERROR', nodeId + ': ping failed — ' + e.message);
                     });
             },
@@ -5863,43 +5865,123 @@
                 if (savedMode) _syncModeUI(savedMode);
             })();
 
-            // P2: восстановить префы (pollInterval, тема) из /api/prefs
-            fetch(apiBase + '/api/prefs')
-                .then(function(r) { return r.json(); })
-                .then(function(prefs) {
-                    if (prefs.refresh_interval) {
-                        _pollIntervalMs = prefs.refresh_interval * 1000;
-                        startAutoRefresh();
-                        ['pollIntervalSelect', 'pollInterval'].forEach(function(id) {
-                            var el = document.getElementById(id);
-                            if (el) el.value = String(prefs.refresh_interval);
-                        });
+            // Вспомогательная функция: fetch с таймаутом через AbortController (5 сек)
+            function fetchWithTimeout(url, options, timeoutMs) {
+                timeoutMs = timeoutMs || 5000;
+                var controller = new AbortController();
+                var tid = setTimeout(function() { controller.abort(); }, timeoutMs);
+                var opts = Object.assign({}, options || {}, { signal: controller.signal });
+                return fetch(url, opts).then(function(r) {
+                    clearTimeout(tid);
+                    return r;
+                }).catch(function(e) {
+                    clearTimeout(tid);
+                    if (e.name === 'AbortError') {
+                        console.warn('fetch timed out:', url);
                     }
-                    if (prefs.theme) {
-                        setTheme(prefs.theme === 'dark');
-                    }
-                })
-                .catch(function() {});
+                    throw e;
+                });
+            }
 
             // Восстановить режим данных из nodes.yaml — ТОЛЬКО если localStorage пуст (первый запуск)
             // При повторных F5 localStorage является source of truth — nodes.yaml не перезаписывает
             var lsHasMode = (function() {
                 try { return localStorage.getItem(LS_MODE) !== null; } catch(e) { return false; }
             })();
-            if (!lsHasMode) {
-                fetch(apiBase + '/api/config/mode')
+
+            // P2 + B2 + config: параллельные запросы вместо последовательных — быстрее загрузка
+            var promises = [
+                // /api/prefs — восстановить pollInterval, тему
+                fetchWithTimeout(apiBase + '/api/prefs')
+                    .then(function(r) { return r.json(); })
+                    .then(function(prefs) {
+                        if (prefs.refresh_interval) {
+                            _pollIntervalMs = prefs.refresh_interval * 1000;
+                            startAutoRefresh();
+                            ['pollIntervalSelect', 'pollInterval'].forEach(function(id) {
+                                var el = document.getElementById(id);
+                                if (el) el.value = String(prefs.refresh_interval);
+                            });
+                        }
+                        if (prefs.theme) {
+                            setTheme(prefs.theme === 'dark');
+                        }
+                    })
+                    .catch(function() {}),
+
+                // /api/scenario — восстановить mock-сценарий при F5
+                fetchWithTimeout(apiBase + '/api/scenario')
                     .then(function(r) { return r.json(); })
                     .then(function(data) {
-                        var savedMode = data.mode || 'mock';
-                        addLog('INFO', 'Первый запуск: режим импортирован из nodes.yaml: ' + savedMode.toUpperCase());
-                        applyMode(savedMode);
+                        var scn = data.scenario || 'normal';
+                        var sel = document.getElementById('scenarioSelect');
+                        if (sel && scn !== 'normal') {
+                            sel.value = scn;
+                            // применяем сценарий к mock данным без POST обратно
+                            if (scenarios[scn]) { scenarios['normal'](); scenarios[scn](); renderAll(); }
+                            addLog('INFO', 'Сценарий восстановлен из бекенда: ' + scn);
+                        }
                     })
-                    .catch(function() {});
+                    .catch(function() {}),
+
+                // /api/config — загрузить cluster/db/settings + dc
+                fetchWithTimeout(apiBase + '/api/config')
+                    .then(function(r) { return r.json(); })
+                    .then(function(cfg) {
+                        if (cfg.cluster)  clusterData.cluster  = cfg.cluster;
+                        if (cfg.db) {
+                            clusterData.db = { user: cfg.db.user || '' };
+                            // Заполняем поля формы в настройках
+                            var dbUserEl = document.getElementById('dbUser');
+                            if (dbUserEl && cfg.db.user) dbUserEl.value = cfg.db.user;
+                            // Пароль не показываем по соображениям безопасности
+                        }
+                        if (cfg.settings) {
+                            clusterData.settings = cfg.settings;
+                            var dbPortEl = document.getElementById('dbPort');
+                            if (dbPortEl && cfg.settings.db_port) dbPortEl.value = cfg.settings.db_port;
+                            // Синхронизируем poll interval если задан
+                            var piEl = document.getElementById('pollInterval');
+                            if (piEl && cfg.settings.poll_interval) piEl.value = String(cfg.settings.poll_interval);
+                        }
+                        // Store full node config for dc/ssh merge (id may include fields not in /api/status)
+                        if (cfg.nodes && cfg.nodes.length) {
+                            _configNodes = cfg.nodes;
+                            _mergeConfigNodes();
+                        }
+                        if (cfg.arbitrators && cfg.arbitrators.length) {
+                            clusterData.arbitrators = cfg.arbitrators;
+                        } else if (cfg.arbitrator && cfg.arbitrator.host) {
+                            clusterData.arbitrators = [cfg.arbitrator];
+                        }
+                        renderYamlPreview();
+                        renderSettingsNodes();
+                        renderArbitratorBlock();
+                        renderOverviewArbitrators();
+                    })
+                    .catch(function() {}),
+            ];
+
+            // /api/config/mode — только при первом запуске (если localStorage пуст)
+            if (!lsHasMode) {
+                promises.push(
+                    fetchWithTimeout(apiBase + '/api/config/mode')
+                        .then(function(r) { return r.json(); })
+                        .then(function(data) {
+                            var savedMode = data.mode || 'mock';
+                            addLog('INFO', 'Первый запуск: режим импортирован из nodes.yaml: ' + savedMode.toUpperCase());
+                            applyMode(savedMode);
+                        })
+                        .catch(function() {})
+                );
             }
 
-            // B4: загрузить последние события с бекенда в Real-режиме
+            // Запускаем все параллельно
+            Promise.all(promises).catch(function() {});
+
+            // B4: загрузить последние события с бекенда в Real-режиме (fire-and-forget)
             function fetchBackendLog() {
-                fetch(apiBase + '/api/log')
+                fetchWithTimeout(apiBase + '/api/log')
                     .then(function(r) { return r.json(); })
                     .then(function(data) {
                         var entries = (data && (data.entries || data.events)) ? (data.entries || data.events) : [];
@@ -5924,58 +6006,6 @@
                     .catch(function() {});
             }
             if (_dataMode === 'real') fetchBackendLog();
-
-            // B2: восстановить сценарий mock при F5
-            fetch(apiBase + '/api/scenario')
-                .then(function(r) { return r.json(); })
-                .then(function(data) {
-                    var scn = data.scenario || 'normal';
-                    var sel = document.getElementById('scenarioSelect');
-                    if (sel && scn !== 'normal') {
-                        sel.value = scn;
-                        // применяем сценарий к mock данным без POST обратно
-                        if (scenarios[scn]) { scenarios['normal'](); scenarios[scn](); renderAll(); }
-                        addLog('INFO', 'Сценарий восстановлен из бекенда: ' + scn);
-                    }
-                })
-                .catch(function() {});
-
-            // Загрузить cluster/db/settings + dc из /api/config для YAML preview
-            fetch(apiBase + '/api/config')
-                .then(function(r) { return r.json(); })
-                .then(function(cfg) {
-                    if (cfg.cluster)  clusterData.cluster  = cfg.cluster;
-                    if (cfg.db) {
-                        clusterData.db = { user: cfg.db.user || '' };
-                        // Заполняем поля формы в настройках
-                        var dbUserEl = document.getElementById('dbUser');
-                        if (dbUserEl && cfg.db.user) dbUserEl.value = cfg.db.user;
-                        // Пароль не показываем по соображениям безопасности
-                    }
-                    if (cfg.settings) {
-                        clusterData.settings = cfg.settings;
-                        var dbPortEl = document.getElementById('dbPort');
-                        if (dbPortEl && cfg.settings.db_port) dbPortEl.value = cfg.settings.db_port;
-                        // Синхронизируем poll interval если задан
-                        var piEl = document.getElementById('pollInterval');
-                        if (piEl && cfg.settings.poll_interval) piEl.value = String(cfg.settings.poll_interval);
-                    }
-                    // Store full node config for dc/ssh merge (id may include fields not in /api/status)
-                    if (cfg.nodes && cfg.nodes.length) {
-                        _configNodes = cfg.nodes;
-                        _mergeConfigNodes();
-                    }
-                    if (cfg.arbitrators && cfg.arbitrators.length) {
-                        clusterData.arbitrators = cfg.arbitrators;
-                    } else if (cfg.arbitrator && cfg.arbitrator.host) {
-                        clusterData.arbitrators = [cfg.arbitrator];
-                    }
-                    renderYamlPreview();
-                    renderSettingsNodes();
-                    renderArbitratorBlock();
-                    renderOverviewArbitrators();
-                })
-                .catch(function() {});
         })();
 
 
@@ -6640,7 +6670,24 @@
 
             fetch(url)
                 .then(function(r) { return r.json(); })
-                .then(function(data) { InnodbStatus.render(data, nodeId); })
+                .then(function(data) {
+                    // Бекенд возвращает {ok, node_id, status} — нормализуем для render()
+                    if (!data.ok) {
+                        container.innerHTML = '<div style="padding:var(--space-4);color:var(--color-error)">'
+                            + '⚠ ' + (data.detail || data.error || 'Ошибка получения данных') + '</div>';
+                        return;
+                    }
+                    // data.status — raw текст (pole из SHOW ENGINE INNODB STATUS)
+                    // data.raw / data.sections — если отвечает расширенный бекенд, используем в приоритет
+                    if (!data.raw && data.status !== undefined) {
+                        data.raw = data.status;
+                    }
+                    if (data.raw === '' || data.raw === null || data.raw === undefined) {
+                        container.innerHTML = '<div style="padding:var(--space-4);color:var(--color-text-muted)">Нет данных — SHOW ENGINE INNODB STATUS вернул пустой результат</div>';
+                        return;
+                    }
+                    InnodbStatus.render(data, nodeId);
+                })
                 .catch(function(e) {
                     container.innerHTML = '<div style="padding:var(--space-4);color:var(--color-error)">'
                         + '⚠ Ошибка: ' + e.message + '</div>';

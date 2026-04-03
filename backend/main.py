@@ -4,12 +4,14 @@ from contextlib import asynccontextmanager
 from datetime import datetime
 from pathlib import Path
 
-# paramiko uses TripleDES internally; suppress the deprecation noise until
-# paramiko ships a fix — it is a third-party issue, not ours.
+# paramiko uses TripleDES internally which triggers CryptographyDeprecationWarning
+# (a subclass of UserWarning, not DeprecationWarning) on import. Suppress it
+# until paramiko ships a fix — this is a third-party issue, not ours.
+# Must be set BEFORE importing paramiko.
 warnings.filterwarnings(
     "ignore",
     message="TripleDES has been moved",
-    category=DeprecationWarning,
+    category=UserWarning,
 )
 
 from fastapi import FastAPI, WebSocket, WebSocketDisconnect, HTTPException, Request

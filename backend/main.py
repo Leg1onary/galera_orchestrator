@@ -11,7 +11,7 @@ from typing import Optional
 
 from config import load_config, save_config
 from galera_client import get_cluster_status
-from mock_data import set_scenario, get_scenario
+from mock_data import set_scenario, get_scenario, mock_innodb_status
 
 # ── Shared SSH helper ────────────────────────────────────────
 def ssh_run(node: dict, *cmds: str, timeout: int = 30) -> list:
@@ -901,10 +901,16 @@ async def check_all():
 @app.get("/api/node/{node_id}/innodb-status")
 async def innodb_status(node_id: str):
     """DB: SHOW ENGINE INNODB STATUS — returns raw output for deadlock analysis."""
-    cfg  = load_config()
-    node = next((n for n in cfg.get("nodes", []) if n["id"] == node_id), None)
+    cfg      = load_config()
+    use_mock = cfg.get("settings", {}).get("use_mock", True)
+    node     = next((n for n in cfg.get("nodes", []) if n["id"] == node_id), None)
     if not node:
         raise HTTPException(404, f"Node '{node_id}' not found")
+
+    if use_mock:
+        return {"ok": True, "mock": True, "node_id": node_id,
+                "status": mock_innodb_status(node_id)}
+
     try:
         # FIX: use _db_connect
         conn = _db_connect(node, cfg)
@@ -913,7 +919,7 @@ async def innodb_status(node_id: str):
             row = cur.fetchone()
         conn.close()
         raw = row[2] if row and len(row) >= 3 else ""
-        return {"ok": True, "node_id": node_id, "status": raw}
+        return {"ok": True, "mock": False, "node_id": node_id, "status": raw}
     except Exception as e:
         raise HTTPException(500, str(e))
 

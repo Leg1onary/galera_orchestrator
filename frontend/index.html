@@ -1271,8 +1271,149 @@
             box-shadow: none;
         }
     </style>
+
+    <!-- ═══ LOGIN PAGE STYLES ══════════════════════════════════════ -->
+    <style>
+        #loginOverlay {
+            display: none;
+            position: fixed; inset: 0; z-index: 9999;
+            background: #0f0e0c;
+            align-items: center; justify-content: center;
+        }
+        #loginOverlay.active { display: flex; }
+
+        .login-card {
+            width: 100%; max-width: 400px;
+            background: #1c1b19;
+            border: 1px solid #393836;
+            border-radius: 12px;
+            padding: 40px 36px 36px;
+            box-shadow: 0 24px 64px rgba(0,0,0,.6);
+            animation: loginFadeIn .25s ease;
+        }
+        @keyframes loginFadeIn {
+            from { opacity: 0; transform: translateY(16px); }
+            to   { opacity: 1; transform: translateY(0); }
+        }
+
+        .login-logo {
+            display: flex; align-items: center; gap: 12px;
+            margin-bottom: 28px;
+        }
+        .login-logo-icon {
+            width: 40px; height: 40px; border-radius: 8px;
+            background: #4f98a3;
+            display: flex; align-items: center; justify-content: center;
+            font-weight: 700; font-size: 14px; color: #fff;
+            letter-spacing: .5px; flex-shrink: 0;
+        }
+        .login-logo-text { line-height: 1.2; }
+        .login-logo-title {
+            font-size: 15px; font-weight: 600;
+            color: #cdccca;
+        }
+        .login-logo-sub {
+            font-size: 12px; color: #797876;
+        }
+
+        .login-heading {
+            font-size: 22px; font-weight: 700;
+            color: #cdccca; margin-bottom: 6px;
+        }
+        .login-sub {
+            font-size: 13px; color: #797876;
+            margin-bottom: 28px;
+        }
+
+        .login-field { margin-bottom: 16px; }
+        .login-field label {
+            display: block; font-size: 12px; font-weight: 500;
+            color: #9a9997; margin-bottom: 6px; letter-spacing: .3px;
+        }
+        .login-field input {
+            width: 100%; box-sizing: border-box;
+            background: #252422; border: 1px solid #3d3c3a;
+            border-radius: 8px; padding: 10px 14px;
+            font-size: 14px; color: #cdccca;
+            outline: none; transition: border-color .15s;
+        }
+        .login-field input:focus {
+            border-color: #4f98a3;
+            box-shadow: 0 0 0 3px rgba(79,152,163,.15);
+        }
+        .login-field input::placeholder { color: #5a5957; }
+
+        .login-error {
+            background: rgba(161,44,123,.12);
+            border: 1px solid rgba(161,44,123,.3);
+            border-radius: 6px; padding: 9px 12px;
+            font-size: 13px; color: #d163a7;
+            margin-bottom: 16px; display: none;
+        }
+        .login-error.visible { display: block; }
+
+        .login-btn {
+            width: 100%; padding: 11px;
+            background: #4f98a3; border: none; border-radius: 8px;
+            font-size: 14px; font-weight: 600; color: #fff;
+            cursor: pointer; transition: background .15s, opacity .15s;
+        }
+        .login-btn:hover { background: #3d7f8a; }
+        .login-btn:disabled { opacity: .6; cursor: default; }
+        .login-btn.loading:after {
+            content: '';
+            display: inline-block; width: 12px; height: 12px;
+            border: 2px solid rgba(255,255,255,.4);
+            border-top-color: #fff;
+            border-radius: 50%;
+            animation: spin .7s linear infinite;
+            margin-left: 8px; vertical-align: -2px;
+        }
+
+        .login-footer {
+            margin-top: 24px; text-align: center;
+            font-size: 11px; color: #5a5957;
+        }
+        .login-footer a { color: #4f98a3; text-decoration: none; }
+        .login-footer a:hover { text-decoration: underline; }
+    </style>
 </head>
 <body>
+
+<!-- ═════════════════════════════════════════════════════════════
+     LOGIN OVERLAY (hidden by default, shown by auth.js when needed)
+     ============================================================ -->
+<div id="loginOverlay">
+  <div class="login-card">
+    <div class="login-logo">
+      <div class="login-logo-icon">GO</div>
+      <div class="login-logo-text">
+        <div class="login-logo-title">Galera Orchestrator</div>
+        <div class="login-logo-sub">Cluster Management UI</div>
+      </div>
+    </div>
+    <div class="login-heading">Вход</div>
+    <div class="login-sub">Введите учётные данные для доступа к панели управления</div>
+    <div id="loginError" class="login-error"></div>
+    <form id="loginForm" onsubmit="return false;">
+      <div class="login-field">
+        <label for="loginUsername">Логин</label>
+        <input id="loginUsername" type="text" autocomplete="username"
+               placeholder="admin" spellcheck="false" />
+      </div>
+      <div class="login-field">
+        <label for="loginPassword">Пароль</label>
+        <input id="loginPassword" type="password" autocomplete="current-password"
+               placeholder="••••••••" />
+      </div>
+      <button id="loginBtn" type="submit" class="login-btn">Войти</button>
+    </form>
+    <div class="login-footer">
+      <a href="https://github.com/Leg1onary/galera_orchestrator" target="_blank" rel="noopener">GitHub</a>
+      &nbsp;·&nbsp; Galera Orchestrator
+    </div>
+  </div>
+</div>
 
 <!-- ============================================================
      APP SHELL
@@ -1356,6 +1497,14 @@
         <button class="theme-btn" id="themeToggle" title="Переключить тему" aria-label="Переключить тему">
             <svg id="themeIcon" width="20" height="20" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2">
                 <path d="M21 12.79A9 9 0 1 1 11.21 3 7 7 0 0 0 21 12.79z"/>
+            </svg>
+        </button>
+        <!-- Logout button — visible only when auth is enabled -->
+        <button class="theme-btn" id="logoutBtn" title="Выйти" onclick="AuthManager.logout()" style="display:none">
+            <svg width="20" height="20" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2">
+                <path d="M9 21H5a2 2 0 0 1-2-2V5a2 2 0 0 1 2-2h4"/>
+                <polyline points="16 17 21 12 16 7"/>
+                <line x1="21" y1="12" x2="9" y2="12"/>
             </svg>
         </button>
     </header>
@@ -2958,6 +3107,153 @@
 <!-- ============================================================
      JAVASCRIPT — все в одном IIFE, никаких async на верхнем уровне
      ============================================================ -->
+<script>
+    // ============================================================
+    // AUTH MANAGER — runs before the main IIFE, guards the whole app
+    // ============================================================
+    var AuthManager = (function() {
+        var LS_TOKEN = 'galera_auth_token';
+        var _authEnabled = false;
+
+        function getToken() {
+            try { return localStorage.getItem(LS_TOKEN) || ''; } catch(e) { return ''; }
+        }
+        function setToken(t) {
+            try { localStorage.setItem(LS_TOKEN, t); } catch(e) {}
+        }
+        function clearToken() {
+            try { localStorage.removeItem(LS_TOKEN); } catch(e) {}
+        }
+
+        // Monkey-patch global fetch to always attach the Bearer token
+        // and redirect to login on 401.
+        var _origFetch = window.fetch;
+        window.fetch = function(input, init) {
+            init = init || {};
+            init.headers = init.headers || {};
+            var token = getToken();
+            if (token) {
+                init.headers['Authorization'] = 'Bearer ' + token;
+            }
+            return _origFetch.call(window, input, init).then(function(resp) {
+                if (resp.status === 401 && _authEnabled) {
+                    clearToken();
+                    showLogin();
+                }
+                return resp;
+            });
+        };
+
+        function showLogin() {
+            var overlay = document.getElementById('loginOverlay');
+            if (overlay) overlay.classList.add('active');
+            var uField = document.getElementById('loginUsername');
+            if (uField) uField.focus();
+        }
+        function hideLogin() {
+            var overlay = document.getElementById('loginOverlay');
+            if (overlay) overlay.classList.remove('active');
+        }
+
+        function showError(msg) {
+            var el = document.getElementById('loginError');
+            if (!el) return;
+            el.textContent = msg;
+            el.classList.add('visible');
+        }
+        function clearError() {
+            var el = document.getElementById('loginError');
+            if (el) el.classList.remove('visible');
+        }
+
+        function doLogin(username, password) {
+            var btn = document.getElementById('loginBtn');
+            if (btn) { btn.disabled = true; btn.classList.add('loading'); }
+            clearError();
+
+            _origFetch('/api/auth/login', {
+                method: 'POST',
+                headers: { 'Content-Type': 'application/json' },
+                body: JSON.stringify({ username: username, password: password })
+            })
+            .then(function(r) { return r.json().then(function(d) { return { ok: r.ok, data: d }; }); })
+            .then(function(res) {
+                if (res.ok && res.data.token) {
+                    setToken(res.data.token);
+                    hideLogin();
+                    showLogoutBtn();
+                } else {
+                    showError(res.data.detail || 'Неверный логин или пароль');
+                }
+            })
+            .catch(function() { showError('Ошибка соединения с сервером'); })
+            .finally(function() {
+                if (btn) { btn.disabled = false; btn.classList.remove('loading'); }
+            });
+        }
+
+        function logout() {
+            _origFetch('/api/auth/logout', { method: 'POST',
+                headers: { 'Authorization': 'Bearer ' + getToken() } });
+            clearToken();
+            showLogin();
+            clearError();
+        }
+
+        function showLogoutBtn() {
+            var btn = document.getElementById('logoutBtn');
+            if (btn) btn.style.display = '';
+        }
+
+        function init() {
+            // Wire up the login form
+            var form = document.getElementById('loginForm');
+            if (form) {
+                form.addEventListener('submit', function(e) {
+                    e.preventDefault();
+                    var u = (document.getElementById('loginUsername') || {}).value || '';
+                    var p = (document.getElementById('loginPassword') || {}).value || '';
+                    doLogin(u.trim(), p);
+                });
+            }
+            // Enter key in inputs submits form
+            ['loginUsername','loginPassword'].forEach(function(id) {
+                var el = document.getElementById(id);
+                if (el) el.addEventListener('keydown', function(e) {
+                    if (e.key === 'Enter') { if (form) form.dispatchEvent(new Event('submit')); }
+                });
+            });
+
+            // Check auth status with backend
+            _origFetch('/api/auth/status')
+                .then(function(r) { return r.json(); })
+                .then(function(d) {
+                    _authEnabled = !!d.enabled;
+                    if (!_authEnabled) return; // no auth needed
+
+                    showLogoutBtn();
+                    var token = getToken();
+                    if (!token) { showLogin(); return; }
+
+                    // Validate existing token
+                    _origFetch('/api/auth/me', {
+                        headers: { 'Authorization': 'Bearer ' + token }
+                    }).then(function(r) {
+                        if (!r.ok) { clearToken(); showLogin(); }
+                        // token valid — app continues normally
+                    }).catch(function() { showLogin(); });
+                })
+                .catch(function() { /* backend offline — let app handle it */ });
+        }
+
+        return { init: init, logout: logout, getToken: getToken, isEnabled: function() { return _authEnabled; } };
+    })();
+
+    // Init auth immediately (before DOMContentLoaded to avoid flash)
+    document.addEventListener('DOMContentLoaded', function() { AuthManager.init(); });
+    if (document.readyState !== 'loading') { AuthManager.init(); }
+
+</script>
 <script>
     (function() {
         'use strict';

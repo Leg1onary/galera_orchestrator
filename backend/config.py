@@ -64,6 +64,14 @@ class ArbitratorSchema(BaseModel):
     dc: Optional[str] = "DC1"
 
 
+class AuthSchema(BaseModel):
+    enabled: bool = False
+    username: str = "admin"
+    password_hash: str = ""
+    token_expire_hours: int = 24
+    secret_key: str = "change-me-32+"
+
+
 class DbSchema(BaseModel):
     user: str = "monitor"
     password: str = ""
@@ -81,6 +89,7 @@ class ConfigSchema(BaseModel):
     db: DbSchema = Field(default_factory=DbSchema)
     settings: SettingsSchema = Field(default_factory=SettingsSchema)
     cluster: Dict[str, Any] = Field(default_factory=dict)
+    auth: AuthSchema = Field(default_factory=AuthSchema)
     # snapshot keys for mode-switching — store as-is (not validated deeply)
     mock_nodes: List[Dict[str, Any]] = Field(default_factory=list)
     real_nodes: List[Dict[str, Any]] = Field(default_factory=list)

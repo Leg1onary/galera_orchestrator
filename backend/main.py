@@ -1,4 +1,5 @@
 import asyncio, concurrent.futures, json, logging, os, re, subprocess, time as _time, warnings
+from auth import init_auth, is_auth_enabled, verify_password, create_token, require_auth, decode_token, get_token_from_request
 from collections import deque, defaultdict
 from contextlib import asynccontextmanager
 from datetime import datetime
@@ -14,8 +15,8 @@ warnings.filterwarnings(
     category=UserWarning,
 )
 
-from fastapi import FastAPI, WebSocket, WebSocketDisconnect, HTTPException, Request
-from fastapi.responses import HTMLResponse, FileResponse
+from fastapi import FastAPI, WebSocket, WebSocketDisconnect, HTTPException, Request, status
+from fastapi.responses import JSONResponse, HTMLResponse, FileResponse
 from pydantic import BaseModel
 from typing import Optional
 
@@ -227,7 +228,9 @@ async def lifespan(app: FastAPI):
     cfg  = _load_config_cached()
     nodes = [n["id"] for n in cfg.get("nodes", []) if n.get("enabled")]
     arbs  = [a for a in cfg.get("arbitrators", []) if a.get("enabled", True)]
-    log.info(f"Starting Galera Orchestrator | nodes={len(nodes)} | arbitrators={len(arbs)}")
+    init_auth(cfg)  # load auth config (enabled/disabled, credentials)
+    auth_state = "enabled" if is_auth_enabled() else "disabled"
+    log.info(f"Starting Galera Orchestrator | nodes={len(nodes)} | arbitrators={len(arbs)} | auth={auth_state}")
     _push_event("info", f"Galera Orchestrator started | nodes={nodes} | arbitrators={len(arbs)}", "system")
     yield
     await app.state.ws_manager.shutdown()
@@ -255,6 +258,94 @@ async def favicon():
 async def health():
     """Lightweight health check for systemd, load balancers, and uptime monitors."""
     return {"ok": True, "status": "healthy", "ts": datetime.utcnow().isoformat() + "Z"}
+
+
+# ── Auth endpoints ────────────────────────────────────────────────
+
+@app.get("/api/auth/status")
+async def auth_status():
+    """Returns whether auth is enabled (public endpoint — used by frontend on load)."""
+    return {"enabled": is_auth_enabled()}
+
+
+@app.post("/api/auth/login")
+async def auth_login(request: Request):
+    """Login with username+password, receive JWT token."""
+    try:
+        body = await request.json()
+    except Exception:
+        raise HTTPException(status_code=400, detail="Invalid JSON")
+
+    username = str(body.get("username", "")).strip()
+    password = str(body.get("password", ""))
+
+    if not is_auth_enabled():
+        # Auth disabled — return a dummy token so frontend works uniformly
+        return {"ok": True, "token": create_token("admin"), "username": "admin"}
+
+    cfg = _load_config_cached()
+    expected_user = cfg.get("auth", {}).get("username", "admin")
+
+    if username != expected_user or not verify_password(password):
+        _push_event("warn", f"Failed login attempt for user '{username}'", "auth")
+        raise HTTPException(
+            status_code=status.HTTP_401_UNAUTHORIZED,
+            detail="Incorrect username or password",
+        )
+
+    token = create_token(username)
+    _push_event("info", f"User '{username}' logged in", "auth")
+    return {"ok": True, "token": token, "username": username}
+
+
+@app.post("/api/auth/logout")
+async def auth_logout(request: Request):
+    """Logout — client should discard the token."""
+    token = get_token_from_request(request)
+    if token:
+        username = decode_token(token)
+        if username:
+            _push_event("info", f"User '{username}' logged out", "auth")
+    return {"ok": True}
+
+
+@app.get("/api/auth/me")
+async def auth_me(request: Request):
+    """Returns current user info. 401 if not authenticated."""
+    require_auth(request)
+    token = get_token_from_request(request)
+    username = decode_token(token) if token else None
+    return {"username": username, "auth_enabled": is_auth_enabled()}
+
+
+# ── Auth middleware ───────────────────────────────────────────────
+
+@app.middleware("http")
+async def auth_middleware(request: Request, call_next):
+    """Protect all /api/* routes (except public ones) when auth is enabled."""
+    if not is_auth_enabled():
+        return await call_next(request)
+
+    path = request.url.path
+
+    # Always public
+    if path in {"/", "/api/health", "/api/auth/login", "/api/auth/status", "/favicon.ico"}:
+        return await call_next(request)
+
+    # Static frontend files
+    if not path.startswith("/api") and not path.startswith("/ws"):
+        return await call_next(request)
+
+    # Check token
+    token = get_token_from_request(request)
+    if not token or not decode_token(token):
+        return JSONResponse(
+            status_code=status.HTTP_401_UNAUTHORIZED,
+            content={"detail": "Not authenticated"},
+            headers={"WWW-Authenticate": "Bearer"},
+        )
+
+    return await call_next(request)
 
 
 @app.get("/api/status")
@@ -539,6 +630,7 @@ async def reload_config_legacy():
 async def reload_config():
     _invalidate_config_cache()
     cfg = _load_config_cached()
+    init_auth(cfg)  # re-read auth settings after reload
     _push_event("info", "Config reloaded via API", "ui")
     return {"ok": True, "nodes": len(cfg.get("nodes", []))}
 

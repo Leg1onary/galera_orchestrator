@@ -77,3 +77,18 @@ settings:
   poll_interval: 5    # секунды между опросами в real-режиме
   use_mock: true      # true = mock (симуляция), false = real
 
+# ─────────────────────────────────────────────────────────────────
+# Авторизация (опционально)
+# Если enabled: false — пароль не требуется, апп доступен без входа
+# Если enabled: true  — браузер покажет страницу входа перед любым запросом к /api
+#
+# Сгенерировать хэш пароля:
+#   python3 -c "from passlib.hash import bcrypt; print(bcrypt.hash('your_password'))"
+# ─────────────────────────────────────────────────────────────────
+auth:
+  enabled: false                # true — включить авторизацию
+  username: admin               # логин
+  password_hash: ""             # bcrypt-хэш (см. команду выше)
+  token_expire_hours: 24        # время жизни токена в часах
+  secret_key: "change-me-32+"  # секрет для подписи JWT (измените на свой!)
+

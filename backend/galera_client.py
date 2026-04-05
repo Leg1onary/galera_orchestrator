@@ -100,9 +100,10 @@ def get_cluster_status(cfg: dict) -> dict:
     # Build arbitrator statuses
     from mock_data import mock_garbd_status
     arb_statuses = []
+    mock_cluster_size = len(enabled_nodes)  # pass to mock so members reflects real node count
     for arb in arbs_cfg:
         if USE_MOCK(cfg):
-            arb_statuses.append(mock_garbd_status(arb))
+            arb_statuses.append(mock_garbd_status(arb, cluster_size=mock_cluster_size))
         else:
             arb_statuses.append(_arb_status_real(arb))
 

@@ -3075,7 +3075,8 @@
                                 sst_method: nd.sst_method || null,
                             };
                         });
-                        if (msg.arbitrators) clusterData.arbitrators = msg.arbitrators;
+                        // WS is only active in real mode, but guard anyway
+                        if (msg.arbitrators && _dataMode === 'real') clusterData.arbitrators = msg.arbitrators;
                         _mergeConfigNodes();
                         if (msg.cluster_name || msg.environment) {
                             clusterData.cluster = clusterData.cluster || {};
@@ -6251,10 +6252,15 @@
                             _configNodes = cfg.nodes;
                             _mergeConfigNodes();
                         }
-                        if (cfg.arbitrators && cfg.arbitrators.length) {
-                            clusterData.arbitrators = cfg.arbitrators;
-                        } else if (cfg.arbitrator && cfg.arbitrator.host) {
-                            clusterData.arbitrators = [cfg.arbitrator];
+                        // Arbitrators from /api/config (raw nodes.yaml) are used ONLY in real mode.
+                        // In mock mode clusterData.arbitrators is already populated from MOCK_DEFAULT
+                        // via makeMockData() — overwriting it with real IPs would break the separation.
+                        if (_dataMode === 'real') {
+                            if (cfg.arbitrators && cfg.arbitrators.length) {
+                                clusterData.arbitrators = cfg.arbitrators;
+                            } else if (cfg.arbitrator && cfg.arbitrator.host) {
+                                clusterData.arbitrators = [cfg.arbitrator];
+                            }
                         }
                         renderYamlPreview();
                         renderSettingsNodes();

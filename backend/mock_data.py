@@ -118,14 +118,23 @@ def mock_seqno(nodes_cfg: list) -> list:
 
 
 # ── garbd mock status ────────────────────────────────────────
-def mock_garbd_status(arb_cfg: dict) -> dict:
+def mock_garbd_status(arb_cfg: dict, cluster_size: int = 2) -> dict:
     if not arb_cfg.get("enabled"):
         return {"enabled": False, "online": False}
+    base = {
+        "enabled":      True,
+        "online":       True,
+        "id":           arb_cfg.get("id", ""),
+        "host":         arb_cfg.get("host", ""),
+        "dc":           arb_cfg.get("dc", ""),
+        "last_seen_sec": int(time.time() - _garbd["last_seen"]),
+    }
     if _scenario in ("gc01_down", "gc02_down"):
-        return {"enabled": True, "online": True, "host": arb_cfg.get("host", ""),
-                "members": 2, "last_seen_sec": 0}
-    return {"enabled": True, "online": True, "host": arb_cfg.get("host", ""),
-            "members": 2, "last_seen_sec": int(time.time() - _garbd["last_seen"])}
+        base["members"]      = cluster_size - 1
+        base["last_seen_sec"] = 0
+    else:
+        base["members"] = cluster_size
+    return base
 
 
 # ── mock SSH action execution ─────────────────────────────────

@@ -1,94 +1,125 @@
-cluster:
-  name: my-galera-cluster
-  environment: test   # test | prod
+# ================================================================
+# Galera Orchestrator — nodes.yaml (v2)
+# ================================================================
+#
+# Структура: контуры (test / prod) → кластеры → ноды + арбитры
+#
+# Можно добавить несколько кластеров внутри одного контура —
+# переключатель в header позволит выбрать нужный.
+#
+# ВАЖНО: режим mock/real НЕ хранится здесь.
+# Переключается из UI, сохраняется в config/mode.json.
+# ================================================================
 
-# Список нод кластера
-nodes:
-  - id: gc01
-    name: gc01
-    host: 192.168.1.10    # IP ноды
-    port: 3306
-    ssh_port: 22
-    ssh_user: root
-    ssh_key: /home/user/.ssh/id_rsa    # абсолютный путь к ключу
-    db_user: monitor_user              # per-node (опционально)
-    db_password: ""                    # per-node (опционально)
-    dc: DC1                            # Датацентр / сегмент
-    enabled: true
+contours:
 
-  - id: gc02
-    name: gc02
-    host: 192.168.1.11
-    port: 3306
-    ssh_port: 22
-    ssh_user: root
-    ssh_key: /home/user/.ssh/id_rsa
-    dc: DC1
-    enabled: true
+  # ── TEST контур ─────────────────────────────────────────────────
+  test:
+    clusters:
+      - name: test-cluster-1
+        nodes:
+          - id: gc01
+            name: gc01
+            host: 192.168.1.10       # IP ноды
+            port: 3306
+            ssh_port: 22
+            ssh_user: root
+            ssh_key: /root/.ssh/id_rsa   # абсолютный путь к ключу
+            db_user: monitor_user         # per-node (опционально, иначе берётся из db.user)
+            db_password: ""               # per-node (опционально)
+            dc: DC1                       # Датацентр / сегмент
+            enabled: true
 
-  - id: gc03
-    name: gc03
-    host: 192.168.2.10
-    port: 3306
-    ssh_port: 22
-    ssh_user: root
-    ssh_key: /home/user/.ssh/id_rsa
-    dc: DC2
-    enabled: true
+          - id: gc02
+            name: gc02
+            host: 192.168.1.11
+            port: 3306
+            ssh_port: 22
+            ssh_user: root
+            ssh_key: /root/.ssh/id_rsa
+            dc: DC1
+            enabled: true
 
-  - id: gc04
-    name: gc04
-    host: 192.168.2.11
-    port: 3306
-    ssh_port: 22
-    ssh_user: root
-    ssh_key: /home/user/.ssh/id_rsa
-    dc: DC2
-    enabled: true
+          - id: gc03
+            name: gc03
+            host: 192.168.2.10
+            port: 3306
+            ssh_port: 22
+            ssh_user: root
+            ssh_key: /root/.ssh/id_rsa
+            dc: DC2
+            enabled: true
 
-# Арбитры — по одному на каждый ДЦ (для test и prod контуров)
-# garbd участвует в кворуме, но не хранит данных
-# Рекомендуется при чётном числе нод данных
-arbitrators:
-  - id: arb01
-    host: 192.168.1.12
-    ssh_port: 22
-    ssh_user: root
-    ssh_key: /home/user/.ssh/id_rsa
-    dc: DC1
-    enabled: true
+        arbitrators:
+          - id: arb-test-01
+            host: 192.168.1.12
+            ssh_port: 22
+            ssh_user: root
+            ssh_key: /root/.ssh/id_rsa
+            dc: DC1
+            enabled: true
 
-  - id: arb02
-    host: 192.168.2.12
-    ssh_port: 22
-    ssh_user: root
-    ssh_key: /home/user/.ssh/id_rsa
-    dc: DC2
-    enabled: true
+  # ── PROD контур ──────────────────────────────────────────────────
+  # Заполните перед использованием real-режима с prod контуром.
+  # Если контур пуст — кнопка PROD в UI покажет предупреждение.
+  prod:
+    clusters:
+      - name: prod-cluster-1
+        nodes:
+          - id: prod-gc01
+            name: prod-gc01
+            host: 10.10.1.10
+            port: 3306
+            ssh_port: 22
+            ssh_user: root
+            ssh_key: /root/.ssh/id_rsa
+            dc: DC1
+            enabled: false   # ← включить когда заполните реальные данные
 
-# Глобальные credentials для подключения к MariaDB
+          - id: prod-gc02
+            name: prod-gc02
+            host: 10.10.1.11
+            port: 3306
+            ssh_port: 22
+            ssh_user: root
+            ssh_key: /root/.ssh/id_rsa
+            dc: DC1
+            enabled: false
+
+        arbitrators:
+          - id: arb-prod-01
+            host: 10.10.1.12
+            ssh_port: 22
+            ssh_user: root
+            ssh_key: /root/.ssh/id_rsa
+            dc: DC1
+            enabled: false
+
+
+# ── Глобальные DB credentials ────────────────────────────────────
 # Создать пользователя:
-#   GRANT SELECT, PROCESS, REPLICATION CLIENT ON *.* TO 'monitor_user'@'%' IDENTIFIED BY 'strong_password';
+#   GRANT SELECT, PROCESS, REPLICATION CLIENT ON *.*
+#     TO 'monitor_user'@'%' IDENTIFIED BY 'strong_password';
 db:
   user: monitor_user
   password: CHANGE_ME
 
-settings:
-  poll_interval: 5    # секунды между опросами в real-режиме
-  use_mock: true      # true = mock (симуляция), false = real
 
-# ─────────────────────────────────────────────────────────────────
-# Авторизация (опционально)
-# Если enabled: false — пароль не требуется, апп доступен без входа
-# Если enabled: true  — браузер покажет страницу входа перед любым запросом к /api
+# ── Настройки ────────────────────────────────────────────────────
+settings:
+  poll_interval: 5   # секунды между опросами в real-режиме
+
+
+# ── Авторизация (опционально) ────────────────────────────────────
+# Если enabled: false — пароль не требуется, UI доступен без входа.
+# Если enabled: true  — браузер покажет страницу входа.
 #
 # Сгенерировать хэш пароля:
-#   python3 -c "from passlib.hash import bcrypt; print(bcrypt.hash('your_password'))"
-# ─────────────────────────────────────────────────────────────────
+#   python3 -c "import bcrypt; print(bcrypt.hashpw(b'mypassword', bcrypt.gensalt()).decode())"
+# ────────────────────────────────────────────────────────────────
 auth:
-  enabled: false                # true — включить авторизацию
-  username: admin               # логин
-  password_hash: ""             # bcrypt-хэш (см. команду выше)
-  token_expire_hours: 24        # время жизни токена в часах
-  secret_key: "change-me-32+"  # секрет для подписи JWT (измените на свой!)
-
+  enabled: false                  # true — включить авторизацию
+  username: admin                 # логин
+  password_hash: ""               # bcrypt-хэш (см. команду выше)
+  token_expire_hours: 24          # время жизни токена в часах
+  secret_key: "change-me-32+"    # секрет JWT — замените на случайную строку!

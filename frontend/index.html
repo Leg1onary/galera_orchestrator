@@ -1467,6 +1467,25 @@
                         onclick="App.setDataMode('real')">REAL</button>
             </div>
 
+            <!-- Contour selector (test / prod) — only in real mode -->
+            <div id="contourBar" style="display:flex;align-items:center;gap:4px;padding-left:var(--space-3);border-left:1px solid rgba(255,255,255,0.12)">
+                <span style="font-size:0.68rem;color:var(--color-text-muted);white-space:nowrap;text-transform:uppercase;letter-spacing:.5px">Контур:</span>
+                <div style="display:flex;align-items:center;gap:3px;background:var(--surface-2);border:1px solid var(--border);border-radius:var(--radius-full);padding:2px">
+                    <button id="contourBtnTest" class="btn btn-sm active"
+                            style="height:24px;padding:0 9px;font-size:0.68rem;border-radius:9999px;font-weight:700"
+                            onclick="ClusterSelector.selectContour('test')">TEST</button>
+                    <button id="contourBtnProd" class="btn btn-ghost btn-sm"
+                            style="height:24px;padding:0 9px;font-size:0.68rem;border-radius:9999px;font-weight:700"
+                            onclick="ClusterSelector.selectContour('prod')">PROD</button>
+                </div>
+                <!-- Cluster dropdown -->
+                <select id="clusterSelect" class="form-input"
+                        style="width:auto;max-width:160px;padding:2px 6px;font-size:0.72rem;height:26px;border-radius:var(--radius-full)"
+                        onchange="ClusterSelector.selectCluster(this.value)">
+                    <option value="0">cluster-1</option>
+                </select>
+            </div>
+
             <!-- Poll interval + refresh -->
             <div style="display:flex;align-items:center;gap:var(--space-2);padding-left:var(--space-3);border-left:1px solid rgba(255,255,255,0.12)">
                 <span style="font-size:0.72rem;color:var(--color-text-muted);white-space:nowrap">Опрос:</span>
@@ -2098,12 +2117,51 @@
             <div class="page-header">
                 <div>
                     <h1 class="page-title">Настройки</h1>
-                    <p class="page-subtitle">Управление конфигурацией нод и арбитра (nodes.yaml)</p>
+                    <p class="page-subtitle" id="settingsSubtitle">Управление конфигурацией нод и арбитра (nodes.yaml)</p>
                 </div>
                 <button class="btn btn-primary" onclick="App.reloadYaml()">
                     <svg width="16" height="16" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2.2"><polyline points="23 4 23 10 17 10"/><path d="M20.49 15a9 9 0 1 1-.02-8.49"/></svg>
                     Reload nodes.yaml
                 </button>
+            </div>
+
+            <!-- Cluster Management -->
+            <div class="form-section" id="clusterMgmtSection">
+                <div class="form-section-title">
+                    <svg width="20" height="20" viewBox="0 0 24 24" fill="none" stroke="var(--primary)" stroke-width="2"><circle cx="12" cy="12" r="3"/><path d="M19.07 4.93a10 10 0 0 1 0 14.14M4.93 4.93a10 10 0 0 0 0 14.14"/></svg>
+                    Управление кластерами
+                </div>
+
+                <!-- Active cluster info -->
+                <div style="margin-bottom:var(--space-4);padding:var(--space-3) var(--space-4);background:var(--surface-2);border:1px solid var(--border);border-radius:var(--radius-md)">
+                    <div style="font-size:var(--text-xs);color:var(--text-muted);margin-bottom:4px;text-transform:uppercase;letter-spacing:.5px">Активный кластер</div>
+                    <div style="display:flex;align-items:center;gap:var(--space-3);flex-wrap:wrap">
+                        <div id="activeClusterName" style="font-size:var(--text-base);font-weight:600;color:var(--text)">—</div>
+                        <div id="activeContourBadge" style="font-size:0.68rem;font-weight:700;padding:2px 8px;border-radius:999px;background:var(--color-primary);color:#fff">ТЕСТ</div>
+                    </div>
+                </div>
+
+                <!-- Clusters list per contour -->
+                <div id="clusterListContainer" style="margin-bottom:var(--space-4)"></div>
+
+                <!-- Add new cluster form -->
+                <div style="display:flex;gap:var(--space-2);align-items:flex-end;flex-wrap:wrap">
+                    <div style="flex:1;min-width:160px">
+                        <label class="form-label">Название нового кластера</label>
+                        <input id="newClusterName" type="text" class="form-input" placeholder="prod-cluster-2" />
+                    </div>
+                    <div style="min-width:120px">
+                        <label class="form-label">Контур</label>
+                        <select id="newClusterContour" class="form-input">
+                            <option value="test">test</option>
+                            <option value="prod">prod</option>
+                        </select>
+                    </div>
+                    <button class="btn btn-primary" onclick="App.createCluster()" style="height:38px">
+                        <svg width="14" height="14" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2.5"><line x1="12" y1="5" x2="12" y2="19"/><line x1="5" y1="12" x2="19" y2="12"/></svg>
+                        Создать кластер
+                    </button>
+                </div>
             </div>
 
             <!-- Node list -->
@@ -3253,6 +3311,122 @@
     document.addEventListener('DOMContentLoaded', function() { AuthManager.init(); });
     if (document.readyState !== 'loading') { AuthManager.init(); }
 
+</script>
+<script>
+// ============================================================
+// CLUSTER SELECTOR — contour (test/prod) + multi-cluster
+// ============================================================
+var ClusterSelector = (function() {
+    var _contour      = 'test';
+    var _clusterIdx   = 0;
+    var _contours     = {};   // {test: ['cluster-1', 'cluster-2'], prod: []}
+    var _isMockMode   = true;
+
+    function _updateUI() {
+        // Contour buttons
+        var btnTest = document.getElementById('contourBtnTest');
+        var btnProd = document.getElementById('contourBtnProd');
+        if (btnTest) {
+            var isTest = _contour === 'test';
+            btnTest.className = 'btn btn-sm' + (isTest ? ' active' : ' btn-ghost');
+            btnTest.style.background = isTest ? 'var(--color-primary)' : '';
+            btnTest.style.color      = isTest ? '#fff' : '';
+        }
+        if (btnProd) {
+            var isProd = _contour === 'prod';
+            btnProd.className = 'btn btn-sm' + (isProd ? ' active' : ' btn-ghost');
+            btnProd.style.background = isProd ? '#6daa45' : '';
+            btnProd.style.color      = isProd ? '#fff' : '';
+        }
+
+        // Cluster dropdown
+        var sel = document.getElementById('clusterSelect');
+        if (sel) {
+            var clusters = _contours[_contour] || [];
+            sel.innerHTML = clusters.length
+                ? clusters.map(function(name, i) {
+                    return '<option value="'+i+'"'+(i===_clusterIdx?' selected':'')+'>'+name+'</option>';
+                  }).join('')
+                : '<option value="0">Нет кластеров</option>';
+        }
+
+        // Contour bar visibility: always show in real mode,
+        // hide in mock mode (mock data is topology-agnostic)
+        var bar = document.getElementById('contourBar');
+        if (bar) bar.style.display = _isMockMode ? 'none' : 'flex';
+    }
+
+    function load() {
+        return fetch('/api/contours')
+            .then(function(r) { return r.json(); })
+            .then(function(d) {
+                _contours   = d.contours   || {};
+                var sel     = d.selection  || {};
+                _contour    = sel.contour      || 'test';
+                _clusterIdx = sel.cluster_index|| 0;
+                _updateUI();
+            })
+            .catch(function() {});
+    }
+
+    function setMockMode(isMock) {
+        _isMockMode = isMock;
+        _updateUI();
+    }
+
+    function selectContour(contour) {
+        var clusters = _contours[contour];
+        if (!clusters || clusters.length === 0) {
+            // Contour exists but has no clusters — inform user, stay on current
+            if (_contours.hasOwnProperty(contour)) {
+                if (typeof toast === 'function') toast('warn', 'Контур ' + contour.toUpperCase() + ' не имеет кластеров');
+            } else {
+                if (typeof toast === 'function') toast('warn', 'Контур ' + contour.toUpperCase() + ' не найден в nodes.yaml');
+            }
+            return;
+        }
+        _contour    = contour;
+        _clusterIdx = 0;
+        _updateUI();
+        _persist();
+    }
+
+    function selectCluster(idxStr) {
+        var idx = parseInt(idxStr, 10);
+        if (isNaN(idx)) return;
+        _clusterIdx = idx;
+        _persist();
+    }
+
+    function _persist() {
+        fetch('/api/contours/select', {
+            method: 'POST',
+            headers: {'Content-Type': 'application/json'},
+            body: JSON.stringify({contour: _contour, cluster_index: _clusterIdx})
+        })
+        .then(function(r) { return r.json(); })
+        .then(function(d) {
+            if (d.ok && typeof fetchRealData === 'function') {
+                fetchRealData();
+                if (typeof addLog === 'function')
+                    addLog('INFO', 'Активный кластер: ' + d.cluster_name + ' (' + _contour.toUpperCase() + ')');
+            }
+        })
+        .catch(function() {});
+    }
+
+    function _inject(data, isMock) {
+        _contours   = data.contours   || {};
+        var sel     = data.selection  || {};
+        _contour    = sel.contour      || 'test';
+        _clusterIdx = sel.cluster_index || 0;
+        _isMockMode = !!isMock;
+        _updateUI();
+    }
+
+    return { load: load, setMockMode: setMockMode, selectContour: selectContour,
+             selectCluster: selectCluster, _inject: _inject };
+})();
 </script>
 <script>
     (function() {
@@ -4629,6 +4803,11 @@
                 clusterData = { nodes: [], timestamp: null }; // чистый скелет
             }
 
+            // Contour bar: visible only in real mode
+            if (typeof ClusterSelector !== 'undefined') {
+                ClusterSelector.setMockMode(mode === 'mock');
+            }
+
             _lastUpdateStr = '—';
             var lu0 = document.getElementById('lastUpdateTime');
             if (lu0) lu0.textContent = '—';
@@ -5180,6 +5359,9 @@
                 if (pageEl) pageEl.classList.add('active');
                 event.currentTarget.classList.add('active');
                 renderAll();
+                if (page === 'settings') {
+                    setTimeout(function() { if (typeof App.renderClusterList === 'function') App.renderClusterList(); }, 50);
+                }
                 if (page === 'diagnostics') {
                     setTimeout(function() { Diag.init(); InnodbStatus.init(); }, 50);
                 }
@@ -5689,6 +5871,85 @@
                         badges.forEach(function(b) { b.className = 'node-ping-badge ping-fail'; b.textContent = '✗ error'; });
                         addLog('ERROR', nodeId + ': ping failed — ' + e.message);
                     });
+            },
+
+            // ── Cluster management ───────────────────────────────────
+            renderClusterList: function() {
+                fetch('/api/contours')
+                    .then(function(r) { return r.json(); })
+                    .then(function(d) {
+                        var contours = d.contours   || {};
+                        var sel      = d.selection  || {};
+                        var active   = d.active_cluster || {};
+
+                        // Update active cluster display in settings header
+                        var nameEl   = document.getElementById('activeClusterName');
+                        var badgeEl  = document.getElementById('activeContourBadge');
+                        if (nameEl)  nameEl.textContent  = active.name || '—';
+                        if (badgeEl) {
+                            var c = active._contour || sel.contour || 'test';
+                            badgeEl.textContent  = c.toUpperCase();
+                            badgeEl.style.background = c === 'prod' ? '#437a22' : 'var(--color-primary)';
+                        }
+
+                        // Render cluster table
+                        var container = document.getElementById('clusterListContainer');
+                        if (!container) return;
+                        var html = '';
+                        Object.keys(contours).forEach(function(cname) {
+                            var clusters = contours[cname];
+                            html += '<div style="margin-bottom:var(--space-3)">';
+                            html += '<div style="font-size:var(--text-xs);text-transform:uppercase;letter-spacing:.5px;color:var(--text-muted);margin-bottom:var(--space-1)">' + cname + '</div>';
+                            if (clusters.length === 0) {
+                                html += '<div style="font-size:var(--text-sm);color:var(--text-faint);padding:var(--space-2) var(--space-3);background:var(--surface-2);border-radius:var(--radius-md)">Нет кластеров</div>';
+                            } else {
+                                clusters.forEach(function(cluName, idx) {
+                                    var isActive = (cname === (active._contour||sel.contour)) && idx === (active._index !== undefined ? active._index : sel.cluster_index);
+                                    html += '<div style="display:flex;align-items:center;gap:var(--space-2);padding:var(--space-2) var(--space-3);background:var(--surface-2);border:1px solid '+(isActive?'var(--color-primary)':'var(--border)')+';border-radius:var(--radius-md);margin-bottom:4px;cursor:pointer" onclick="ClusterSelector.selectContour(\''+cname+'\'); document.getElementById(\'clusterSelect\').value=\''+idx+'\'; ClusterSelector.selectCluster(\''+idx+'\')">'+
+                                        '<span style="width:8px;height:8px;border-radius:50%;background:'+(isActive?'var(--color-primary)':'var(--color-text-faint)')+';flex-shrink:0"></span>'+
+                                        '<span style="flex:1;font-size:var(--text-sm);color:var(--text);font-weight:'+(isActive?'600':'400')+'">' + cluName + '</span>'+
+                                        (isActive ? '<span style="font-size:0.65rem;color:var(--color-primary);font-weight:700">Активный</span>' : '') +
+                                    '</div>';
+                                });
+                            }
+                            html += '</div>';
+                        });
+                        if (!html) html = '<div style="color:var(--text-muted);font-size:var(--text-sm)">Контуры не найдены. Добавьте contours: в nodes.yaml</div>';
+                        container.innerHTML = html;
+
+                        // Also update ClusterSelector with fresh data
+                        if (typeof ClusterSelector !== 'undefined' && ClusterSelector._inject) {
+                            ClusterSelector._inject(d, _dataMode === 'mock');
+                        }
+                    })
+                    .catch(function(e) { console.warn('renderClusterList:', e); });
+            },
+
+            createCluster: function() {
+                var name    = (document.getElementById('newClusterName')    || {}).value || '';
+                var contour = (document.getElementById('newClusterContour') || {}).value || 'test';
+                name = name.trim();
+                if (!name) { toast('warning', 'Укажите название кластера'); return; }
+
+                fetch('/api/contours/cluster', {
+                    method: 'POST',
+                    headers: {'Content-Type': 'application/json'},
+                    body: JSON.stringify({contour: contour, name: name})
+                })
+                .then(function(r) { return r.json(); })
+                .then(function(d) {
+                    if (d.ok) {
+                        toast('success', 'Кластер \'' + name + '\' создан в контуре ' + contour);
+                        var inp = document.getElementById('newClusterName');
+                        if (inp) inp.value = '';
+                        App.renderClusterList();
+                        addLog('INFO', 'Создан кластер: ' + name + ' (' + contour + ')');
+                        renderSettingsNodes();
+                    } else {
+                        toast('error', d.detail || 'Ошибка создания');
+                    }
+                })
+                .catch(function(e) { toast('error', 'Ошибка: ' + e.message); });
             },
 
             reloadYaml: function() {
@@ -6519,6 +6780,17 @@
                             // применяем сценарий к mock данным без POST обратно
                             if (scenarios[scn]) { scenarios['normal'](); scenarios[scn](); renderAll(); }
                             addLog('INFO', 'Сценарий восстановлен из бекенда: ' + scn);
+                        }
+                    })
+                    .catch(function() {}),
+
+                // /api/contours — загрузить список контуров и кластеров
+                fetchWithTimeout(apiBase + '/api/contours')
+                    .then(function(r) { return r.json(); })
+                    .then(function(d) {
+                        if (typeof ClusterSelector !== 'undefined') {
+                            // Feed data directly to avoid a second fetch
+                            ClusterSelector._inject && ClusterSelector._inject(d, _dataMode === 'mock');
                         }
                     })
                     .catch(function() {}),

@@ -1,8 +1,17 @@
+"""
+Galera cluster status collector.
+
+get_cluster_status(cluster, cfg) accepts a cluster dict
+{name, nodes, arbitrators} and the top-level cfg for db credentials.
+In mock mode: returns generated data from mock_data.py.
+In real mode: connects via pymysql + paramiko SSH.
+"""
+
 import logging
-from config import load_config, get_runtime_mode
+from config import get_runtime_mode
 from mock_data import node_status as mock_node_status
 
-log = logging.getLogger("galera_client")
+log = logging.getLogger("galera_orchestrator")
 
 try:
     import pymysql
@@ -11,7 +20,7 @@ except ImportError:
     HAS_PYMYSQL = False
     log.warning("pymysql not installed — real mode unavailable. Run: pip install pymysql")
 
-# wsrep variables to collect
+# wsrep variables to collect from SHOW STATUS
 WSREP_VARS = [
     "wsrep_cluster_status",
     "wsrep_local_state_comment",
@@ -34,31 +43,32 @@ WSREP_VARS = [
 ]
 
 
-def USE_MOCK(cfg: dict) -> bool:
-    """Read use_mock from mode.json (runtime override) or fall back to nodes.yaml."""
-    return get_runtime_mode()
+def get_cluster_status(cluster: dict, cfg: dict) -> dict:
+    """
+    cluster: {name, nodes, arbitrators, ...}
+    cfg:     top-level config dict (for db credentials, settings)
+    Returns the full status payload sent to frontend.
+    """
+    nodes_cfg = cluster.get("nodes", [])
+    arbs_cfg  = cluster.get("arbitrators", [])
 
-
-def get_cluster_status(cfg: dict) -> dict:
-    nodes_cfg = cfg.get("nodes", [])
-    # Support both singular 'arbitrator' (legacy) and plural 'arbitrators' list
-    arbs_cfg = cfg.get("arbitrators", [])
-    if not arbs_cfg:
-        arb_single = cfg.get("arbitrator", {})
-        if arb_single:
-            arbs_cfg = [arb_single]
-
-    results = []
     enabled_nodes = [n for n in nodes_cfg if n.get("enabled", True)]
+    use_mock      = get_runtime_mode()
 
-    if USE_MOCK(cfg):
+    # ── Node statuses ───────────────────────────────────────────────
+    results = []
+    if use_mock:
         cluster_size = len(enabled_nodes)
         for n in enabled_nodes:
-            results.append(mock_node_status(n["id"], n, cluster_size=cluster_size, all_nodes=enabled_nodes))
+            results.append(mock_node_status(
+                n["id"], n,
+                cluster_size=cluster_size,
+                all_nodes=enabled_nodes,
+            ))
     else:
         from concurrent.futures import ThreadPoolExecutor, as_completed
         ordered = {n["id"]: None for n in enabled_nodes}
-        with ThreadPoolExecutor(max_workers=len(enabled_nodes) or 1) as pool:
+        with ThreadPoolExecutor(max_workers=max(len(enabled_nodes), 1)) as pool:
             fmap = {pool.submit(_real_node_status, n, cfg): n["id"] for n in enabled_nodes}
             for fut in as_completed(fmap, timeout=12):
                 nid = fmap[fut]
@@ -72,7 +82,7 @@ def get_cluster_status(cfg: dict) -> dict:
                     }
         results = [ordered[n["id"]] for n in enabled_nodes]
 
-    # Enrich results with ssh/dc fields from nodes_cfg
+    # Enrich with ssh/dc fields from config
     _cfg_by_id = {n["id"]: n for n in enabled_nodes}
     for r in results:
         nid  = r.get("id")
@@ -97,32 +107,32 @@ def get_cluster_status(cfg: dict) -> dict:
         "critical"
     )
 
-    # Build arbitrator statuses
+    # ── Arbitrator statuses ─────────────────────────────────────────
     from mock_data import mock_garbd_status
     arb_statuses = []
-    mock_cluster_size = len(enabled_nodes)  # pass to mock so members reflects real node count
+    mock_cluster_size = len(enabled_nodes)
     for arb in arbs_cfg:
-        if USE_MOCK(cfg):
+        if not arb.get("enabled", True):
+            continue
+        if use_mock:
             arb_statuses.append(mock_garbd_status(arb, cluster_size=mock_cluster_size))
         else:
             arb_statuses.append(_arb_status_real(arb))
 
     return {
-        "cluster_name":  cfg.get("cluster", {}).get("name",        "galera-cluster"),
-        "environment":   cfg.get("cluster", {}).get("environment", "test"),
+        "cluster_name":   cluster.get("name", "galera-cluster"),
         "cluster_status": cluster_status,
-        "cluster_size":  results[0]["wsrep_cluster_size"] if results else 0,
-        "nodes_total":   len(results),
-        "nodes_synced":  synced,
-        "nodes_online":  online,
-        "flow_control":  round(fc_paused, 2),
-        "cert_failures": cert_fail,
-        "use_mock":      USE_MOCK(cfg),
-        # Legacy single arbitrator field (backwards compat)
-        "arbitrator":    arb_statuses[0] if arb_statuses else {"enabled": False, "online": False},
-        # New list field for multi-arbitrator UI
-        "arbitrators":   arb_statuses,
-        "nodes":         results,
+        "cluster_size":   results[0]["wsrep_cluster_size"] if results else 0,
+        "nodes_total":    len(results),
+        "nodes_synced":   synced,
+        "nodes_online":   online,
+        "flow_control":   round(fc_paused, 2),
+        "cert_failures":  cert_fail,
+        "use_mock":       use_mock,
+        # Legacy single-arb field (kept for backwards compat)
+        "arbitrator":     arb_statuses[0] if arb_statuses else {"enabled": False, "online": False},
+        "arbitrators":    arb_statuses,
+        "nodes":          results,
     }
 
 
@@ -135,7 +145,7 @@ def _real_node_status(node: dict, cfg: dict) -> dict:
         "port":   node.get("port", 3306),
         "online": False,
         "error":  None,
-        "state":  "Offline",   # FIX: default state для UI (node.state используется в 30+ местах)
+        "state":  "Offline",
     }
 
     if not HAS_PYMYSQL:
@@ -178,7 +188,6 @@ def _real_node_status(node: dict, cfg: dict) -> dict:
 
         base.update({
             "online":                    True,
-            # FIX: добавлено поле "state" — UI использует node.state везде
             "state":                     state_comment,
             "wsrep_cluster_status":      status.get("wsrep_cluster_status", "unknown"),
             "wsrep_local_state_comment": state_comment,
@@ -204,12 +213,10 @@ def _real_node_status(node: dict, cfg: dict) -> dict:
                 base[_var] = status[_var]
         log.debug(f"[{node['id']}] real status OK — {state_comment}")
 
-    except pymysql.err.OperationalError as e:
-        base["error"] = f"DB connect error: {e.args[1] if len(e.args) > 1 else str(e)}"
-        log.warning(f"[{node['id']}] {base['error']}")
     except Exception as e:
-        base["error"] = str(e)
-        log.warning(f"[{node['id']}] unexpected error: {e}")
+        msg = e.args[1] if (hasattr(e, 'args') and len(e.args) > 1) else str(e)
+        base["error"] = f"DB error: {msg}"
+        log.warning(f"[{node['id']}] {base['error']}")
 
     return base
 
@@ -218,7 +225,6 @@ def _arb_status_real(arb_cfg: dict) -> dict:
     """Real mode SSH check for a single arbitrator."""
     try:
         import paramiko
-        from pathlib import Path
         client = paramiko.SSHClient()
         client.set_missing_host_key_policy(paramiko.AutoAddPolicy())
         client.connect(
@@ -248,3 +254,7 @@ def _arb_status_real(arb_cfg: dict) -> dict:
         log.warning(f"[garbd {arb_cfg.get('id', '')}] SSH check failed: {e}")
         return {"enabled": True, "online": False, "host": arb_cfg.get("host", ""),
                 "id": arb_cfg.get("id", ""), "error": str(e)}
+
+
+# missing import needed for _arb_status_real
+from pathlib import Path

@@ -24,7 +24,12 @@ import paramiko
 import pymysql
 import pymysql.cursors
 
-from config import load_config, save_config
+from config import (
+    load_config, save_config,
+    get_runtime_mode, set_runtime_mode,
+    get_selection, set_selection,
+    get_active_cluster, list_contours,
+)
 from galera_client import get_cluster_status
 from mock_data import (
     set_scenario, get_scenario,
@@ -226,11 +231,13 @@ _version_cache: Optional[dict] = None
 async def lifespan(app: FastAPI):
     app.state.ws_manager = _WsManager()
     cfg  = _load_config_cached()
-    nodes = [n["id"] for n in cfg.get("nodes", []) if n.get("enabled")]
-    arbs  = [a for a in cfg.get("arbitrators", []) if a.get("enabled", True)]
+    nodes = [n["id"] for n in get_active_cluster(cfg).get("nodes", []) if n.get("enabled")]
+    arbs  = [a for a in get_active_cluster(cfg).get("arbitrators", []) if a.get("enabled", True)]
     init_auth(cfg)  # load auth config (enabled/disabled, credentials)
     auth_state = "enabled" if is_auth_enabled() else "disabled"
-    log.info(f"Starting Galera Orchestrator | nodes={len(nodes)} | arbitrators={len(arbs)} | auth={auth_state}")
+    contours_info = list_contours(cfg)
+    cluster = get_active_cluster(cfg)
+    log.info(f"Starting Galera Orchestrator | contours={list(contours_info.keys())} | active_cluster={cluster.get('name')} | auth={auth_state}")
     _push_event("info", f"Galera Orchestrator started | nodes={nodes} | arbitrators={len(arbs)}", "system")
     yield
     await app.state.ws_manager.shutdown()
@@ -352,8 +359,15 @@ async def auth_middleware(request: Request, call_next):
 async def api_status():
     global _prev_status
     try:
-        cfg  = _load_config_cached()
-        data = await asyncio.get_event_loop().run_in_executor(None, get_cluster_status, cfg)
+        cfg     = _load_config_cached()
+        cluster = get_active_cluster(cfg)
+        data    = await asyncio.get_event_loop().run_in_executor(
+            None, get_cluster_status, cluster, cfg
+        )
+        # Add selection metadata to response
+        sel = get_selection()
+        data["contour"]       = cluster.get("_contour", sel.get("contour", "test"))
+        data["cluster_index"] = cluster.get("_index",   sel.get("cluster_index", 0))
         status = data.get("cluster", {}).get("status", "unknown")
         if status != _prev_status:
             _push_event("info", f"Cluster status changed: {_prev_status} → {status}", "monitor")
@@ -380,20 +394,139 @@ async def get_scenario_api():
 
 @app.get("/api/config")
 async def get_config():
-    return _load_config_cached()
+    cfg = _load_config_cached()
+    # Also return active selection for frontend init
+    sel     = get_selection()
+    cluster = get_active_cluster(cfg)
+    return {**cfg, "_selection": sel, "_active_cluster": cluster}
 
+
+# ── Contour / Cluster selection ───────────────────────────────────────────────
+
+@app.get("/api/contours")
+async def get_contours():
+    """List all contours and their clusters."""
+    cfg  = _load_config_cached()
+    sel  = get_selection()
+    return {
+        "contours":      list_contours(cfg),
+        "selection":     sel,
+        "active_cluster": get_active_cluster(cfg),
+    }
+
+
+@app.post("/api/contours/select")
+async def select_cluster(request: Request):
+    """Set active contour + cluster. Body: {contour: str, cluster_index: int}"""
+    body    = await request.json()
+    cfg     = _load_config_cached()
+    contour = str(body.get("contour", "test"))
+    idx     = int(body.get("cluster_index", 0))
+
+    contours = cfg.get("contours", {})
+    if contour not in contours:
+        raise HTTPException(404, f"Contour '{contour}' not found")
+    clusters = contours[contour].get("clusters", [])
+    if not clusters:
+        raise HTTPException(404, f"Contour '{contour}' has no clusters")
+    if idx >= len(clusters):
+        raise HTTPException(400, f"cluster_index {idx} out of range (max {len(clusters)-1})")
+
+    set_selection(contour, idx)
+    _invalidate_config_cache()
+    cluster = get_active_cluster(_load_config_cached())
+    _push_event("info", f"Active cluster: {cluster.get('name')} ({contour})", "ui")
+    return {"ok": True, "contour": contour, "cluster_index": idx, "cluster_name": cluster.get("name")}
+
+
+@app.post("/api/contours/cluster")
+async def add_cluster(request: Request):
+    """Add a new cluster to a contour. Body: {contour, name, ...}"""
+    body    = await request.json()
+    contour = str(body.get("contour", "test"))
+    name    = str(body.get("name", "")).strip()
+    if not name:
+        raise HTTPException(400, "Cluster name is required")
+
+    cfg = load_config()
+    cfg.setdefault("contours", {})
+    cfg["contours"].setdefault(contour, {"clusters": []})
+    cfg["contours"][contour].setdefault("clusters", [])
+
+    # Check no duplicate name in this contour
+    existing = [c["name"] for c in cfg["contours"][contour]["clusters"]]
+    if name in existing:
+        raise HTTPException(409, f"Cluster '{name}' already exists in '{contour}'")
+
+    new_cluster = {
+        "name":         name,
+        "nodes":        [],
+        "arbitrators":  [],
+    }
+    cfg["contours"][contour]["clusters"].append(new_cluster)
+    save_config(cfg)
+    _invalidate_config_cache()
+
+    # Auto-select the new cluster
+    new_idx = len(cfg["contours"][contour]["clusters"]) - 1
+    set_selection(contour, new_idx)
+
+    _push_event("info", f"New cluster '{name}' created in '{contour}'", "ui")
+    return {"ok": True, "contour": contour, "cluster_index": new_idx, "name": name}
+
+
+@app.delete("/api/contours/{contour}/cluster/{idx}")
+async def delete_cluster(contour: str, idx: int):
+    """Delete a cluster from a contour by index."""
+    cfg = load_config()
+    clusters = cfg.get("contours", {}).get(contour, {}).get("clusters", [])
+    if idx >= len(clusters):
+        raise HTTPException(404, "Cluster not found")
+    removed = clusters.pop(idx)
+    save_config(cfg)
+    _invalidate_config_cache()
+    # Reset selection to first cluster in contour
+    new_idx = 0 if clusters else 0
+    set_selection(contour, new_idx)
+    _push_event("info", f"Cluster '{removed.get('name')}' deleted from '{contour}'", "ui")
+    return {"ok": True}
+
+
+# ── Nodes API (v2 — scoped to active cluster) ──────────────────────────────────
 
 @app.get("/api/nodes")
 async def list_nodes():
-    cfg = _load_config_cached()
-    return {"nodes": cfg.get("nodes", [])}
+    cfg     = _load_config_cached()
+    cluster = get_active_cluster(cfg)
+    return {"nodes": cluster.get("nodes", [])}
+
+
+def _get_active_nodes(cfg: dict) -> list:
+    """Helper: enabled nodes from active cluster."""
+    return [n for n in get_active_cluster(cfg).get("nodes", []) if n.get("enabled", True)]
+
+
+def _find_node(cfg: dict, node_id: str) -> dict | None:
+    """Find a node by id in the active cluster."""
+    cluster = get_active_cluster(cfg)
+    return next((n for n in cluster.get("nodes", []) if n["id"] == node_id), None)
+
+
+def _find_node_globally(cfg: dict, node_id: str) -> dict | None:
+    """Find a node by id across ALL contours and clusters."""
+    for contour_data in cfg.get("contours", {}).values():
+        for cluster in contour_data.get("clusters", []):
+            for n in cluster.get("nodes", []):
+                if n["id"] == node_id:
+                    return n
+    return None
 
 
 @app.get("/api/node/{node_id}/test-connection")
 async def test_node_connection(node_id: str):
     """SSH + DB connectivity check."""
     cfg  = _load_config_cached()
-    node = next((n for n in cfg.get("nodes", []) if n["id"] == node_id), None)
+    node = _find_node(cfg, node_id)
     if not node:
         raise HTTPException(404, f"Node '{node_id}' not found")
 
@@ -433,7 +566,7 @@ async def node_action(node_id: str, body: NodeActionRequest):
     """Execute a predefined SSH action on a single Galera node."""
     _check_rate_limit(node_id)
     cfg  = _load_config_cached()
-    node = next((n for n in cfg.get("nodes", []) if n["id"] == node_id), None)
+    node = _find_node(cfg, node_id)
     if not node:
         raise HTTPException(404, f"Node '{node_id}' not found")
 
@@ -441,12 +574,22 @@ async def node_action(node_id: str, body: NodeActionRequest):
         "stop":          "systemctl stop mariadb",
         "start":         "systemctl start mariadb",
         "restart":       "systemctl restart mariadb",
-        "set_read_only": "mysql -e \"SET GLOBAL read_only=1;\"",
-        "set_read_write":"mysql -e \"SET GLOBAL read_only=0;\"",
+        "rejoin":        "systemctl restart mariadb",
+        "set_read_only": 'mysql -e "SET GLOBAL read_only=1;"',
+        "set_read_write":'mysql -e "SET GLOBAL read_only=0;"',
     }
     cmd = msgs.get(body.action)
     if not cmd:
         raise HTTPException(400, f"Unknown action '{body.action}'. Allowed: {list(msgs)}")
+
+    # Mock mode: simulate the action, no real SSH
+    if get_runtime_mode():
+        from mock_data import mock_ssh_action
+        result = mock_ssh_action(node_id, body.action, cmd)
+        ok  = result["exit_code"] == 0
+        msg = result.get("stdout") or result.get("stderr") or ("ok" if ok else "error")
+        _push_event("info" if ok else "error", f"[MOCK] Action '{body.action}' on {node_id}: {msg}", "ui")
+        return {"ok": ok, "mock": True, "msg": msg}
 
     try:
         [(ec, out, err)] = ssh_run(node, cmd, timeout=30)
@@ -495,7 +638,7 @@ class NodeConfig(BaseModel):
 @app.post("/api/config/node")
 async def add_node(node: NodeConfig):
     cfg   = load_config()
-    nodes = cfg.get("nodes", [])
+    nodes = get_active_cluster(cfg).get("nodes", [])
     if any(n["id"] == node.id for n in nodes):
         raise HTTPException(409, f"Node '{node.id}' already exists")
     node_dict = {
@@ -521,7 +664,7 @@ async def add_node(node: NodeConfig):
 @app.delete("/api/config/node/{node_id}")
 async def delete_node(node_id: str):
     cfg       = load_config()
-    nodes     = cfg.get("nodes", [])
+    nodes     = get_active_cluster(cfg).get("nodes", [])
     new_nodes = [n for n in nodes if n["id"] != node_id]
     if len(new_nodes) == len(nodes):
         raise HTTPException(404, f"Node '{node_id}' not found")
@@ -546,7 +689,7 @@ class ArbitratorConfig(BaseModel):
 @app.post("/api/config/arbitrator")
 async def add_arbitrator(arb: ArbitratorConfig):
     cfg  = load_config()
-    arbs = cfg.get("arbitrators", [])
+    arbs = get_active_cluster(cfg).get("arbitrators", [])
     if any(a["id"] == arb.id for a in arbs):
         raise HTTPException(409, f"Arbitrator '{arb.id}' already exists")
     arbs.append(arb.dict())
@@ -560,7 +703,7 @@ async def add_arbitrator(arb: ArbitratorConfig):
 @app.delete("/api/config/arbitrator/{arb_id}")
 async def delete_arbitrator(arb_id: str):
     cfg      = load_config()
-    arbs     = cfg.get("arbitrators", [])
+    arbs     = get_active_cluster(cfg).get("arbitrators", [])
     new_arbs = [a for a in arbs if a["id"] != arb_id]
     if len(new_arbs) == len(arbs):
         raise HTTPException(404, f"Arbitrator '{arb_id}' not found")
@@ -585,7 +728,7 @@ async def delete_all_arbitrators():
 async def update_arbitrator(arb_id: str, body: ArbitratorConfig):
     """Update an existing arbitrator. Validated via Pydantic — only known fields are accepted."""
     cfg  = load_config()
-    arbs = cfg.get("arbitrators", [])
+    arbs = get_active_cluster(cfg).get("arbitrators", [])
     if isinstance(arbs, dict):
         arbs = [arbs]
     idx = next((i for i, a in enumerate(arbs) if a.get("id") == arb_id), None)
@@ -610,7 +753,7 @@ class DBCredentials(BaseModel):
 async def update_db_credentials(creds: DBCredentials):
     """Update DB credentials for all nodes."""
     cfg   = load_config()
-    nodes = cfg.get("nodes", [])
+    nodes = get_active_cluster(cfg).get("nodes", [])
     for node in nodes:
         node["db_user"]     = creds.db_user
         node["db_password"] = creds.db_pass
@@ -632,7 +775,7 @@ async def reload_config():
     cfg = _load_config_cached()
     init_auth(cfg)  # re-read auth settings after reload
     _push_event("info", "Config reloaded via API", "ui")
-    return {"ok": True, "nodes": len(cfg.get("nodes", []))}
+    return {"ok": True, "nodes": len(get_active_cluster(cfg).get("nodes", []))}
 
 
 @app.get("/api/prefs")
@@ -655,7 +798,7 @@ async def save_prefs(request: Request):
 async def garbd_log(arb_id: str, lines: int = 100):
     """SSH: tail the garbd log from the arbitrator host."""
     cfg = _load_config_cached()
-    arbs = cfg.get("arbitrators", [])
+    arbs = get_active_cluster(cfg).get("arbitrators", [])
     arb  = next((a for a in arbs if a["id"] == arb_id), None)
     if not arb:
         raise HTTPException(404, f"Arbitrator '{arb_id}' not found")
@@ -681,8 +824,8 @@ async def garbd_log(arb_id: str, lines: int = 100):
 async def wsrep_recover(node_id: str):
     """SSH: run galera_recovery / mysqld --wsrep-recover on a single node."""
     cfg      = _load_config_cached()
-    use_mock = cfg.get("settings", {}).get("use_mock", True)
-    node     = next((n for n in cfg.get("nodes", []) if n["id"] == node_id), None)
+    use_mock = get_runtime_mode()
+    node     = _find_node(cfg, node_id)
     if not node:
         raise HTTPException(404, f"Node '{node_id}' not found")
 
@@ -723,8 +866,8 @@ async def get_seqno(request: Request):
     Returns per-node seqno info used by the Bootstrap Wizard.
     """
     cfg      = _load_config_cached()
-    use_mock = cfg.get("settings", {}).get("use_mock", True)
-    nodes    = [n for n in cfg.get("nodes", []) if n.get("enabled")]
+    use_mock = get_runtime_mode()
+    nodes    = _get_active_nodes(cfg)
 
     body = {}
     try:
@@ -791,8 +934,8 @@ async def wsrep_recover_all():
     Used by the Bootstrap Wizard to determine which node has the highest seqno.
     """
     cfg      = _load_config_cached()
-    use_mock = cfg.get("settings", {}).get("use_mock", True)
-    nodes    = [n for n in cfg.get("nodes", []) if n.get("enabled")]
+    use_mock = get_runtime_mode()
+    nodes    = _get_active_nodes(cfg)
 
     if use_mock:
         import time as _t
@@ -844,15 +987,27 @@ async def bootstrap_wizard(request: Request):
     """
     body         = await request.json()
     candidate_id = body.get("candidate_id") or body.get("node_id")
-    if not candidate_id:
-        raise HTTPException(400, "candidate_id is required")
 
     cfg      = _load_config_cached()
-    use_mock = cfg.get("settings", {}).get("use_mock", True)
-    nodes    = [n for n in cfg.get("nodes", []) if n.get("enabled")]
+    use_mock = get_runtime_mode()
+    nodes    = _get_active_nodes(cfg)
+
+    if not nodes:
+        raise HTTPException(400, "No enabled nodes found in the active cluster")
+
+    # Auto-select candidate if not provided: pick node with highest seqno (mock)
+    # or first available node (real — let the wizard guide the user)
+    if not candidate_id:
+        if use_mock:
+            # In mock mode pick node with highest deterministic seqno
+            from mock_data import _node_base_seqno
+            candidate_id = max(nodes, key=lambda n: _node_base_seqno(n["id"]))["id"]
+        else:
+            candidate_id = nodes[0]["id"]
+
     candidate = next((n for n in nodes if n["id"] == candidate_id), None)
     if not candidate:
-        raise HTTPException(404, f"Node '{candidate_id}' not found")
+        raise HTTPException(404, f"Node '{candidate_id}' not found in active cluster")
 
     if use_mock:
         steps = mock_bootstrap(candidate_id, nodes)
@@ -916,8 +1071,8 @@ async def bootstrap_wizard(request: Request):
 async def reset_grastate(node_id: str):
     """SSH: reset safe_to_bootstrap flag in grastate.dat."""
     cfg      = _load_config_cached()
-    use_mock = cfg.get("settings", {}).get("use_mock", True)
-    node     = next((n for n in cfg.get("nodes", []) if n["id"] == node_id), None)
+    use_mock = get_runtime_mode()
+    node     = _find_node(cfg, node_id)
     if not node:
         raise HTTPException(404, f"Node '{node_id}' not found")
 
@@ -949,8 +1104,8 @@ async def reset_grastate(node_id: str):
 async def pc_bootstrap(node_id: str):
     """DB: SET GLOBAL wsrep_provider_options='pc.bootstrap=YES' to force Primary Component."""
     cfg      = _load_config_cached()
-    use_mock = cfg.get("settings", {}).get("use_mock", True)
-    node     = next((n for n in cfg.get("nodes", []) if n["id"] == node_id), None)
+    use_mock = get_runtime_mode()
+    node     = _find_node(cfg, node_id)
     if not node:
         raise HTTPException(404, f"Node '{node_id}' not found")
 
@@ -987,8 +1142,8 @@ async def do_rejoin_cluster(request: Request):
         raise HTTPException(400, "node_id is required")
 
     cfg      = _load_config_cached()
-    use_mock = cfg.get("settings", {}).get("use_mock", True)
-    node     = next((n for n in cfg.get("nodes", []) if n["id"] == node_id), None)
+    use_mock = get_runtime_mode()
+    node     = _find_node(cfg, node_id)
     if not node:
         raise HTTPException(404, f"Node '{node_id}' not found")
 
@@ -1029,7 +1184,7 @@ async def do_bootstrap(request: Request):
     body    = await request.json()
     node_id = body.get("node_id")
     cfg     = _load_config_cached()
-    nodes   = [n for n in cfg.get("nodes", []) if n.get("enabled")]
+    nodes   = _get_active_nodes(cfg)
     if not nodes:
         raise HTTPException(400, "No enabled nodes in config")
     candidate = next((n for n in nodes if n["id"] == node_id), None) if node_id else None
@@ -1074,7 +1229,7 @@ async def do_bootstrap(request: Request):
 async def do_rejoin(node_id: str):
     """SSH: stop + start MariaDB on the given node to re-join the cluster."""
     cfg  = _load_config_cached()
-    node = next((n for n in cfg.get("nodes", []) if n["id"] == node_id), None)
+    node = _find_node(cfg, node_id)
     if not node:
         raise HTTPException(404, f"Node '{node_id}' not found")
     try:
@@ -1100,7 +1255,7 @@ async def force_sst_donor(node_id: str, request: Request):
     body     = await request.json()
     donor_id = body.get("donor_id")
     cfg      = _load_config_cached()
-    nodes    = cfg.get("nodes", [])
+    nodes    = get_active_cluster(cfg).get("nodes", [])
     node     = next((n for n in nodes if n["id"] == node_id), None)
     donor    = next((n for n in nodes if n["id"] == donor_id), None) if donor_id else None
     if not node:
@@ -1124,7 +1279,7 @@ async def force_sst_donor(node_id: str, request: Request):
 async def sst_status(node_id: str):
     """SSH + DB: monitor SST progress on the given node."""
     cfg  = _load_config_cached()
-    node = next((n for n in cfg.get("nodes", []) if n["id"] == node_id), None)
+    node = _find_node(cfg, node_id)
     if not node:
         raise HTTPException(404, f"Node '{node_id}' not found")
 
@@ -1180,7 +1335,7 @@ async def sst_status(node_id: str):
 async def get_processlist(node_id: str, min_time: int = 0):
     """DB: SHOW FULL PROCESSLIST filtered by minimum query time."""
     cfg  = _load_config_cached()
-    node = next((n for n in cfg.get("nodes", []) if n["id"] == node_id), None)
+    node = _find_node(cfg, node_id)
     if not node:
         raise HTTPException(404, f"Node '{node_id}' not found")
     try:
@@ -1204,7 +1359,7 @@ async def kill_query(node_id: str, request: Request):
     if not proc_id:
         raise HTTPException(400, "process_id required")
     cfg  = _load_config_cached()
-    node = next((n for n in cfg.get("nodes", []) if n["id"] == node_id), None)
+    node = _find_node(cfg, node_id)
     if not node:
         raise HTTPException(404, f"Node '{node_id}' not found")
     try:
@@ -1222,7 +1377,7 @@ async def kill_query(node_id: str, request: Request):
 async def compare_galera_cnf():
     """SSH: read galera.cnf from all nodes and return diff-friendly structure."""
     cfg   = _load_config_cached()
-    nodes = [n for n in cfg.get("nodes", []) if n.get("enabled")]
+    nodes = _get_active_nodes(cfg)
     if not nodes:
         return {"ok": True, "nodes": [], "params": {}}
 
@@ -1315,8 +1470,8 @@ async def compare_galera_cnf():
 async def check_all():
     """Run a comprehensive cluster health check across all nodes."""
     cfg   = _load_config_cached()
-    nodes = [n for n in cfg.get("nodes", []) if n.get("enabled")]
-    mode  = cfg.get("settings", {}).get("use_mock", True)
+    nodes = _get_active_nodes(cfg)
+    mode  = get_runtime_mode()
 
     results  = []
     warnings = []
@@ -1388,8 +1543,8 @@ async def check_all():
 async def innodb_status(node_id: str):
     """DB: SHOW ENGINE INNODB STATUS — returns raw output for deadlock analysis."""
     cfg      = _load_config_cached()
-    use_mock = cfg.get("settings", {}).get("use_mock", True)
-    node     = next((n for n in cfg.get("nodes", []) if n["id"] == node_id), None)
+    use_mock = get_runtime_mode()
+    node     = _find_node(cfg, node_id)
     if not node:
         raise HTTPException(404, f"Node '{node_id}' not found")
 
@@ -1517,8 +1672,8 @@ async def diagnostics_system_health():
     Thresholds: disk_warn=80%, disk_crit=90%; mem_warn=85%, mem_crit=95%.
     """
     cfg   = _load_config_cached()
-    nodes = [n for n in cfg.get("nodes", []) if n.get("enabled")]
-    use_mock = cfg.get("settings", {}).get("use_mock", True)
+    nodes = _get_active_nodes(cfg)
+    use_mock = get_runtime_mode()
 
     if not nodes:
         return {"ok": True, "nodes": []}
@@ -1628,8 +1783,8 @@ async def diagnostics_system_health():
 async def node_ping(node_id: str):
     """Quick SSH reachability check + systemctl is-active mariadb.service."""
     cfg      = _load_config_cached()
-    use_mock = cfg.get("settings", {}).get("use_mock", True)
-    node     = next((n for n in cfg.get("nodes", []) if n["id"] == node_id), None)
+    use_mock = get_runtime_mode()
+    node     = _find_node(cfg, node_id)
     if not node:
         raise HTTPException(404, f"Node '{node_id}' not found")
 

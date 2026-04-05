@@ -3696,13 +3696,17 @@ var ClusterSelector = (function() {
         // Эталон mock-данных — используется только при переключении real→mock.
         // Содержит нейтральные адреса (10.0.x.x) — не связан с реальной топологией.
         // Данные mock не попадают на реальные серверы ни при каких условиях.
+        // MOCK_DEFAULT — чистый хардкод, не зависит от nodes.yaml.
+        // 2 ноды (DC1 + DC2) + 1 арбитр — достаточно для демонстрации всех сценариев.
+        // Реальные серверы не опрашиваются ни при каких условиях.
         var MOCK_DEFAULT = {
+            cluster: { name: 'demo-cluster', environment: 'mock' },
             nodes: [
                 {
                     id: 'gc01', name: 'gc01', host: '10.0.1.10', port: 3306, ssh_port: 22,
                     dc: 'DC1', role: 'node', state: 'Synced', read_only: false,
                     metrics: {
-                        wsrep_cluster_status: 'Primary', wsrep_cluster_size: '4',
+                        wsrep_cluster_status: 'Primary', wsrep_cluster_size: '2',
                         wsrep_connected: 'ON', wsrep_ready: 'ON',
                         wsrep_local_state_comment: 'Synced',
                         wsrep_local_recv_queue: '0', wsrep_local_send_queue: '0',
@@ -3712,42 +3716,16 @@ var ClusterSelector = (function() {
                     }
                 },
                 {
-                    id: 'gc02', name: 'gc02', host: '10.0.1.11', port: 3306, ssh_port: 22,
-                    dc: 'DC1', role: 'node', state: 'Synced', read_only: false,
+                    id: 'gc02', name: 'gc02', host: '10.0.2.10', port: 3306, ssh_port: 22,
+                    dc: 'DC2', role: 'node', state: 'Synced', read_only: false,
                     metrics: {
-                        wsrep_cluster_status: 'Primary', wsrep_cluster_size: '4',
+                        wsrep_cluster_status: 'Primary', wsrep_cluster_size: '2',
                         wsrep_connected: 'ON', wsrep_ready: 'ON',
                         wsrep_local_state_comment: 'Synced',
                         wsrep_local_recv_queue: '0', wsrep_local_send_queue: '0',
                         wsrep_flow_control_paused: '0.000', wsrep_cert_deps_distance: '1.48',
                         wsrep_last_committed: '104521',
                         wsrep_replicated_bytes: '2.0 MB', wsrep_received_bytes: '2.1 MB'
-                    }
-                },
-                {
-                    id: 'gc03', name: 'gc03', host: '10.0.2.10', port: 3306, ssh_port: 22,
-                    dc: 'DC2', role: 'node', state: 'Synced', read_only: false,
-                    metrics: {
-                        wsrep_cluster_status: 'Primary', wsrep_cluster_size: '4',
-                        wsrep_connected: 'ON', wsrep_ready: 'ON',
-                        wsrep_local_state_comment: 'Synced',
-                        wsrep_local_recv_queue: '0', wsrep_local_send_queue: '0',
-                        wsrep_flow_control_paused: '0.000', wsrep_cert_deps_distance: '1.52',
-                        wsrep_last_committed: '104521',
-                        wsrep_replicated_bytes: '2.0 MB', wsrep_received_bytes: '2.1 MB'
-                    }
-                },
-                {
-                    id: 'gc04', name: 'gc04', host: '10.0.2.11', port: 3306, ssh_port: 22,
-                    dc: 'DC2', role: 'node', state: 'Synced', read_only: false,
-                    metrics: {
-                        wsrep_cluster_status: 'Primary', wsrep_cluster_size: '4',
-                        wsrep_connected: 'ON', wsrep_ready: 'ON',
-                        wsrep_local_state_comment: 'Synced',
-                        wsrep_local_recv_queue: '0', wsrep_local_send_queue: '0',
-                        wsrep_flow_control_paused: '0.000', wsrep_cert_deps_distance: '1.46',
-                        wsrep_last_committed: '104521',
-                        wsrep_replicated_bytes: '2.1 MB', wsrep_received_bytes: '2.0 MB'
                     }
                 }
             ],
@@ -3756,12 +3734,7 @@ var ClusterSelector = (function() {
                 {
                     id: 'arb01', host: '10.0.1.12', ssh_port: 22,
                     ssh_user: 'root', ssh_key: '~/.ssh/id_rsa',
-                    dc: 'DC1', enabled: true, online: true, members: 4, last_seen_sec: 0
-                },
-                {
-                    id: 'arb02', host: '10.0.2.12', ssh_port: 22,
-                    ssh_user: 'root', ssh_key: '~/.ssh/id_rsa',
-                    dc: 'DC2', enabled: true, online: true, members: 4, last_seen_sec: 0
+                    dc: 'DC1', enabled: true, online: true, members: 2, last_seen_sec: 0
                 }
             ],
         };
@@ -3845,7 +3818,7 @@ var ClusterSelector = (function() {
         };
 
         // ---- LOG ----
-        function addLog(level, msg) {
+        window.addLog = function addLog(level, msg) {
             var now = new Date();
             var t = now.toTimeString().slice(0,8);
             logLines.push({ time: t, level: level, msg: msg });
@@ -4740,7 +4713,7 @@ var ClusterSelector = (function() {
         }
 
         // ---- TOAST ----
-        function toast(type, msg) {
+        window.toast = function toast(type, msg) {
             var area = document.getElementById('toastArea');
             var icons = { success: '✓', error: '✕', info: 'ℹ', warning: '⚠' };
             var t = document.createElement('div');
@@ -6631,7 +6604,7 @@ var ClusterSelector = (function() {
             }, _pollIntervalMs);
         }
 
-        function fetchRealData() {
+        window.fetchRealData = function fetchRealData() {
             var dot = document.getElementById('loadingDot');
             if (dot) dot.style.display = 'inline-block';
             var apiBase = getApiBase();
@@ -6685,6 +6658,11 @@ var ClusterSelector = (function() {
                         clusterData.cluster = clusterData.cluster || {};
                         if (data.cluster_name) clusterData.cluster.name = data.cluster_name;
                         if (data.environment)  clusterData.cluster.environment = data.environment;
+                    }
+                    // Update header subtitle in Settings page with active cluster info
+                    var sub = document.getElementById('settingsSubtitle');
+                    if (sub && data.cluster_name) {
+                        sub.textContent = data.cluster_name + (data.contour ? ' · ' + data.contour.toUpperCase() : '');
                     }
                     if (data.settings) {
                         clusterData.settings = data.settings;

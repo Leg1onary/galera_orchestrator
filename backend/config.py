@@ -270,3 +270,35 @@ def list_contours(cfg: dict) -> Dict[str, List[str]]:
         result[cname] = [cl.get("name", f"cluster-{i}")
                          for i, cl in enumerate(cdata.get("clusters", []))]
     return result
+
+
+def mutate_active_cluster(cfg: dict, field: str, value) -> None:
+    """
+    Write `value` into the active cluster's field (e.g. 'nodes', 'arbitrators').
+    Modifies cfg in-place so the next save_config(cfg) persists it correctly.
+
+    Usage:
+        nodes = get_active_cluster(cfg).get('nodes', [])
+        nodes.append(new_node)
+        mutate_active_cluster(cfg, 'nodes', nodes)
+        save_config(cfg)
+    """
+    sel     = get_selection()
+    contour = sel.get("contour", "test")
+    idx     = int(sel.get("cluster_index", 0))
+
+    contours = cfg.get("contours", {})
+    if contour not in contours:
+        # Fallback: first available contour
+        if contours:
+            contour = next(iter(contours))
+        else:
+            return
+
+    clusters = contours[contour].get("clusters", [])
+    if not clusters:
+        return
+    if idx >= len(clusters):
+        idx = 0
+
+    clusters[idx][field] = value

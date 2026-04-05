@@ -28,7 +28,7 @@ from config import (
     load_config, save_config,
     get_runtime_mode, set_runtime_mode,
     get_selection, set_selection,
-    get_active_cluster, list_contours,
+    get_active_cluster, list_contours, mutate_active_cluster,
 )
 from galera_client import get_cluster_status
 from mock_data import (
@@ -654,7 +654,7 @@ async def add_node(node: NodeConfig):
         "enabled":     node.enabled,
     }
     nodes.append(node_dict)
-    cfg["nodes"] = nodes
+    mutate_active_cluster(cfg, "nodes", nodes)
     save_config(cfg)
     _invalidate_config_cache()
     _push_event("info", f"Node added: {node.id} ({node.host})", "ui")
@@ -668,7 +668,7 @@ async def delete_node(node_id: str):
     new_nodes = [n for n in nodes if n["id"] != node_id]
     if len(new_nodes) == len(nodes):
         raise HTTPException(404, f"Node '{node_id}' not found")
-    cfg["nodes"] = new_nodes
+    mutate_active_cluster(cfg, "nodes", new_nodes)
     save_config(cfg)
     _invalidate_config_cache()
     _push_event("info", f"Node removed: {node_id}", "ui")
@@ -693,7 +693,7 @@ async def add_arbitrator(arb: ArbitratorConfig):
     if any(a["id"] == arb.id for a in arbs):
         raise HTTPException(409, f"Arbitrator '{arb.id}' already exists")
     arbs.append(arb.dict())
-    cfg["arbitrators"] = arbs
+    mutate_active_cluster(cfg, "arbitrators", arbs)
     save_config(cfg)
     _invalidate_config_cache()
     _push_event("info", f"Arbitrator added: {arb.id} ({arb.host})", "ui")
@@ -707,7 +707,7 @@ async def delete_arbitrator(arb_id: str):
     new_arbs = [a for a in arbs if a["id"] != arb_id]
     if len(new_arbs) == len(arbs):
         raise HTTPException(404, f"Arbitrator '{arb_id}' not found")
-    cfg["arbitrators"] = new_arbs
+    mutate_active_cluster(cfg, "arbitrators", new_arbs)
     save_config(cfg)
     _invalidate_config_cache()
     _push_event("info", f"Arbitrator removed: {arb_id}", "ui")
@@ -717,7 +717,7 @@ async def delete_arbitrator(arb_id: str):
 @app.delete("/api/config/arbitrator")
 async def delete_all_arbitrators():
     cfg = load_config()
-    cfg["arbitrators"] = []
+    mutate_active_cluster(cfg, "arbitrators", [])
     save_config(cfg)
     _invalidate_config_cache()
     _push_event("info", "All arbitrators removed", "ui")
@@ -737,7 +737,7 @@ async def update_arbitrator(arb_id: str, body: ArbitratorConfig):
     # Merge: preserve existing id, update the rest
     arbs[idx].update(body.dict())
     arbs[idx]["id"] = arb_id   # ensure id cannot be changed via body
-    cfg["arbitrators"] = arbs
+    mutate_active_cluster(cfg, "arbitrators", arbs)
     save_config(cfg)
     _invalidate_config_cache()
     _push_event("info", f"Arbitrator updated: {arb_id}", "ui")
@@ -757,7 +757,7 @@ async def update_db_credentials(creds: DBCredentials):
     for node in nodes:
         node["db_user"]     = creds.db_user
         node["db_password"] = creds.db_pass
-    cfg["nodes"] = nodes
+    mutate_active_cluster(cfg, "nodes", nodes)
     save_config(cfg)
     _invalidate_config_cache()
     _push_event("info", "DB credentials updated for all nodes", "ui")

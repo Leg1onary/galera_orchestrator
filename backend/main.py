@@ -105,8 +105,30 @@ def _db_connect(node: dict, cfg: dict, **kwargs):
 # ── Persistent event log ─────────────────────────────────────────
 _LOG_DIR  = Path(__file__).parent.parent / "logs"
 _LOG_FILE = _LOG_DIR / "events.log"
-# Note: _LOG_DIR is created lazily inside _write_log_entry to avoid
-# triggering watchfiles reload on startup.
+# Rotation: 5 MB per file, keep 3 backups → max ~20 MB on disk.
+# _event_logger is initialised lazily on first write so the logs/
+# directory is not created at import time (avoids watchfiles noise).
+_event_logger: logging.Logger | None = None
+
+
+def _get_event_logger() -> logging.Logger:
+    global _event_logger
+    if _event_logger is None:
+        from logging.handlers import RotatingFileHandler as _RFH
+        _LOG_DIR.mkdir(parents=True, exist_ok=True)
+        _fh = _RFH(
+            str(_LOG_FILE),
+            maxBytes=5 * 1024 * 1024,   # 5 MB per file
+            backupCount=3,               # events.log.1 / .2 / .3
+            encoding="utf-8",
+        )
+        _fh.setFormatter(logging.Formatter("%(message)s"))
+        _event_logger = logging.getLogger("galera.events")
+        _event_logger.propagate = False   # don't duplicate to root logger
+        _event_logger.setLevel(logging.DEBUG)
+        _event_logger.addHandler(_fh)
+    return _event_logger
+
 
 _event_log: deque = deque(maxlen=500)
 
@@ -143,10 +165,9 @@ def _push_event(level: str, msg: str, source: str = "system"):
 
 
 def _write_log_entry(line: str):
+    """Write one JSON line to the rotating log file (5 MB × 3 backups)."""
     try:
-        _LOG_DIR.mkdir(parents=True, exist_ok=True)
-        with open(_LOG_FILE, "a") as fh:
-            fh.write(line + "\n")
+        _get_event_logger().info(line)
     except Exception:
         pass
 

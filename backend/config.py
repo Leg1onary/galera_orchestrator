@@ -1,9 +1,34 @@
+import json
 import yaml
 from pathlib import Path
 from typing import Any, Dict, List, Optional
 from pydantic import BaseModel, Field, ValidationError, field_validator
 
 CONFIG_PATH = Path(__file__).parent.parent / "config" / "nodes.yaml"
+# Runtime mode is stored separately so nodes.yaml is never rewritten on mode switch.
+# This preserves hand-written comments and key ordering in nodes.yaml.
+_MODE_PATH  = Path(__file__).parent.parent / "config" / "mode.json"
+
+
+def get_runtime_mode() -> bool:
+    """Return use_mock flag. Reads mode.json; falls back to nodes.yaml setting."""
+    if _MODE_PATH.exists():
+        try:
+            return bool(json.loads(_MODE_PATH.read_text(encoding="utf-8")).get("use_mock", True))
+        except Exception:
+            pass
+    # fallback: read from nodes.yaml (first boot, or legacy setup)
+    try:
+        raw = yaml.safe_load(CONFIG_PATH.read_text(encoding="utf-8")) or {}
+        return bool(raw.get("settings", {}).get("use_mock", True))
+    except Exception:
+        return True
+
+
+def set_runtime_mode(use_mock: bool) -> None:
+    """Persist use_mock to mode.json only — never touches nodes.yaml."""
+    _MODE_PATH.parent.mkdir(parents=True, exist_ok=True)
+    _MODE_PATH.write_text(json.dumps({"use_mock": use_mock}, indent=2), encoding="utf-8")
 
 
 # ── Schema ───────────────────────────────────────────────────

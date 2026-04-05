@@ -370,24 +370,20 @@ async def node_action(node_id: str, body: NodeActionRequest):
 
 @app.get("/api/config/mode")
 async def get_mode():
-    cfg = _load_config_cached()
-    use_mock = cfg.get("settings", {}).get("use_mock", True)
-    # Return both keys so frontend works regardless of which field it reads
+    use_mock = get_runtime_mode()
     return {"use_mock": use_mock, "mode": "mock" if use_mock else "real"}
 
 
 @app.post("/api/config/mode")
 async def set_mode(request: Request):
-    body     = await request.json()
+    body = await request.json()
     # Accept both use_mock (bool) and mode ("mock"/"real") from frontend
     if "mode" in body:
         use_mock = body["mode"] != "real"
     else:
         use_mock = bool(body.get("use_mock", True))
-    cfg      = load_config()
-    cfg.setdefault("settings", {})["use_mock"] = use_mock
-    save_config(cfg)
-    _invalidate_config_cache()
+    # Write to config/mode.json only — nodes.yaml is never touched on mode switch
+    set_runtime_mode(use_mock)
     _push_event("info", f"Data mode changed to {'mock' if use_mock else 'real'}", "ui")
     return {"ok": True, "use_mock": use_mock, "mode": "mock" if use_mock else "real"}
 

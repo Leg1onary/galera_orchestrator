@@ -1,5 +1,5 @@
 import logging
-from config import load_config
+from config import load_config, get_runtime_mode
 from mock_data import node_status as mock_node_status
 
 log = logging.getLogger("galera_client")
@@ -35,7 +35,8 @@ WSREP_VARS = [
 
 
 def USE_MOCK(cfg: dict) -> bool:
-    return cfg.get("settings", {}).get("use_mock", True)
+    """Read use_mock from mode.json (runtime override) or fall back to nodes.yaml."""
+    return get_runtime_mode()
 
 
 def get_cluster_status(cfg: dict) -> dict:

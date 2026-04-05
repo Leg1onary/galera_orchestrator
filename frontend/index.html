@@ -3222,12 +3222,13 @@
         });
 
         // ---- DATA MODEL ----
-        // Эталон mock-данных — восстанавливается при переключении real→mock
-        // Соответствует nodes.example.yaml: 4 ноды (2×DC1 + 2×DC2), 2 арбитра
+        // Эталон mock-данных — используется только при переключении real→mock.
+        // Содержит нейтральные адреса (10.0.x.x) — не связан с реальной топологией.
+        // Данные mock не попадают на реальные серверы ни при каких условиях.
         var MOCK_DEFAULT = {
             nodes: [
                 {
-                    id: 'gc01', name: 'gc01', host: '192.168.1.10', port: 3306, ssh_port: 22,
+                    id: 'gc01', name: 'gc01', host: '10.0.1.10', port: 3306, ssh_port: 22,
                     dc: 'DC1', role: 'node', state: 'Synced', read_only: false,
                     metrics: {
                         wsrep_cluster_status: 'Primary', wsrep_cluster_size: '4',
@@ -3240,7 +3241,7 @@
                     }
                 },
                 {
-                    id: 'gc02', name: 'gc02', host: '192.168.1.11', port: 3306, ssh_port: 22,
+                    id: 'gc02', name: 'gc02', host: '10.0.1.11', port: 3306, ssh_port: 22,
                     dc: 'DC1', role: 'node', state: 'Synced', read_only: false,
                     metrics: {
                         wsrep_cluster_status: 'Primary', wsrep_cluster_size: '4',
@@ -3253,7 +3254,7 @@
                     }
                 },
                 {
-                    id: 'gc03', name: 'gc03', host: '192.168.2.10', port: 3306, ssh_port: 22,
+                    id: 'gc03', name: 'gc03', host: '10.0.2.10', port: 3306, ssh_port: 22,
                     dc: 'DC2', role: 'node', state: 'Synced', read_only: false,
                     metrics: {
                         wsrep_cluster_status: 'Primary', wsrep_cluster_size: '4',
@@ -3266,7 +3267,7 @@
                     }
                 },
                 {
-                    id: 'gc04', name: 'gc04', host: '192.168.2.11', port: 3306, ssh_port: 22,
+                    id: 'gc04', name: 'gc04', host: '10.0.2.11', port: 3306, ssh_port: 22,
                     dc: 'DC2', role: 'node', state: 'Synced', read_only: false,
                     metrics: {
                         wsrep_cluster_status: 'Primary', wsrep_cluster_size: '4',
@@ -3282,13 +3283,13 @@
             arbitrator: null,
             arbitrators: [
                 {
-                    id: 'arb01', host: '192.168.1.12', ssh_port: 22,
-                    ssh_user: 'root', ssh_key: '/home/user/.ssh/id_rsa',
+                    id: 'arb01', host: '10.0.1.12', ssh_port: 22,
+                    ssh_user: 'root', ssh_key: '~/.ssh/id_rsa',
                     dc: 'DC1', enabled: true, online: true, members: 4, last_seen_sec: 0
                 },
                 {
-                    id: 'arb02', host: '192.168.2.12', ssh_port: 22,
-                    ssh_user: 'root', ssh_key: '/home/user/.ssh/id_rsa',
+                    id: 'arb02', host: '10.0.2.12', ssh_port: 22,
+                    ssh_user: 'root', ssh_key: '~/.ssh/id_rsa',
                     dc: 'DC2', enabled: true, online: true, members: 4, last_seen_sec: 0
                 }
             ],

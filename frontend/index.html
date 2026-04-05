@@ -412,6 +412,58 @@
             }
         }
 
+        /* ---- SPARKLINES ---- */
+        .sparkline-wrap {
+            display: flex; gap: 8px; margin-top: 10px;
+            padding: 8px 10px;
+            background: rgba(255,255,255,.03);
+            border: 1px solid var(--border);
+            border-radius: var(--radius-md);
+        }
+        .sparkline-item { flex: 1; min-width: 0; }
+        .sparkline-label {
+            font-size: 0.62rem; color: var(--text-muted);
+            text-transform: uppercase; letter-spacing: .4px;
+            margin-bottom: 3px; white-space: nowrap;
+        }
+        .sparkline-value {
+            font-size: 0.75rem; font-weight: 600;
+            color: var(--text); margin-bottom: 4px;
+        }
+        .sparkline-value.warn { color: var(--warning); }
+        .sparkline-value.ok   { color: var(--success); }
+        .sparkline-svg { display: block; width: 100%; }
+
+        /* ---- NOTIFICATIONS TOGGLE ---- */
+        .notif-toggle {
+            display: flex; align-items: center; gap: 6px;
+            font-size: 0.72rem; color: var(--text-muted);
+            cursor: pointer; user-select: none;
+            padding: 4px 8px; border-radius: var(--radius-full);
+            border: 1px solid var(--border);
+            background: var(--surface-2); transition: border-color .15s;
+        }
+        .notif-toggle:hover { border-color: var(--color-primary); color: var(--text); }
+        .notif-toggle input { cursor: pointer; accent-color: var(--color-primary); }
+
+        /* ---- NODE SEARCH ---- */
+        .node-search-wrap {
+            display: flex; align-items: center; gap: 8px;
+            margin-bottom: var(--space-4);
+        }
+        .node-search-input {
+            flex: 1; max-width: 300px;
+            background: var(--surface-2); border: 1px solid var(--border);
+            border-radius: var(--radius-full);
+            padding: 6px 14px; font-size: 0.8rem; color: var(--text);
+            outline: none; transition: border-color .15s;
+        }
+        .node-search-input:focus { border-color: var(--color-primary); }
+        .node-search-input::placeholder { color: var(--text-faint); }
+        .node-search-count {
+            font-size: 0.72rem; color: var(--text-muted); white-space: nowrap;
+        }
+
         /* ---- MAIN CONTENT ---- */
         .app-main {
             overflow-y: auto;
@@ -1277,10 +1329,32 @@
         #loginOverlay {
             display: none;
             position: fixed; inset: 0; z-index: 9999;
-            background: #0f0e0c;
+            background: var(--bg, #0f0e0c);
             align-items: center; justify-content: center;
+            transition: background .2s;
         }
         #loginOverlay.active { display: flex; }
+
+        /* Light mode override — matches [data-theme="light"] on <html> */
+        [data-theme="light"] #loginOverlay { background: #f0efe9; }
+        [data-theme="light"] .login-card {
+            background: #ffffff;
+            border-color: #d4d1ca;
+            box-shadow: 0 8px 32px rgba(0,0,0,.12);
+        }
+        [data-theme="light"] .login-heading { color: #28251d; }
+        [data-theme="light"] .login-sub     { color: #7a7974; }
+        [data-theme="light"] .login-logo-title { color: #28251d; }
+        [data-theme="light"] .login-logo-sub   { color: #7a7974; }
+        [data-theme="light"] .login-field label { color: #5a5957; }
+        [data-theme="light"] .login-field input {
+            background: #f9f8f5; border-color: #d4d1ca; color: #28251d;
+        }
+        [data-theme="light"] .login-field input::placeholder { color: #bab9b4; }
+        [data-theme="light"] .login-footer { color: #9a9997; }
+        [data-theme="light"] .login-error {
+            background: rgba(161,44,123,.08); color: #a12c7b;
+        }
 
         .login-card {
             width: 100%; max-width: 400px;
@@ -1670,12 +1744,29 @@
                     <h1 class="page-title">Ноды кластера</h1>
                     <p class="page-subtitle">Детальные wsrep-метрики по каждому узлу</p>
                 </div>
-                <button class="btn btn-ghost btn-sm" onclick="App.refreshAll()">
-                    <svg width="15" height="15" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2.2"><polyline points="23 4 23 10 17 10"/><path d="M20.49 15a9 9 0 1 1-.02-8.49"/></svg>
-                    Обновить
+                <div style="display:flex;align-items:center;gap:var(--space-2)">
+                    <label class="notif-toggle" id="notifToggleLabel" title="Уведомления браузера при деградации кластера">
+                        <input type="checkbox" id="notifToggle" onchange="NotifManager.toggle(this.checked)">
+                        <svg width="13" height="13" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2"><path d="M18 8A6 6 0 0 0 6 8c0 7-3 9-3 9h18s-3-2-3-9"/><path d="M13.73 21a2 2 0 0 1-3.46 0"/></svg>
+                        Уведомления
+                    </label>
+                    <button class="btn btn-ghost btn-sm" onclick="App.refreshAll()">
+                        <svg width="15" height="15" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2.2"><polyline points="23 4 23 10 17 10"/><path d="M20.49 15a9 9 0 1 1-.02-8.49"/></svg>
+                        Обновить
+                    </button>
+                </div>
+            </div>
+            <!-- Поиск -->
+            <div class="node-search-wrap">
+                <input type="text" class="node-search-input" id="nodeSearchInput"
+                       placeholder="Поиск по имени, IP, DC, состоянию..."
+                       oninput="renderNodesDetailFiltered()">
+                <span class="node-search-count" id="nodeSearchCount"></span>
+                <button class="btn btn-ghost btn-sm" id="nodeSearchClear"
+                        style="display:none" onclick="clearNodeSearch()">
+                    <svg width="12" height="12" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2.5"><line x1="18" y1="6" x2="6" y2="18"/><line x1="6" y1="6" x2="18" y2="18"/></svg>
                 </button>
             </div>
-            <!-- grid-сетка точно как в overview -->
             <div class="nodes-grid" id="nodesDetailGrid"></div>
         </section>
 
@@ -2272,6 +2363,8 @@
                     <a href="#doc-modes" class="btn btn-ghost btn-sm">⚙ Режимы</a>
                     <a href="#doc-settings" class="btn btn-ghost btn-sm">🗂 Настройки</a>
                     <a href="#doc-ws" class="btn btn-ghost btn-sm">🔌 WebSocket</a>
+                    <a href="#doc-wsrep-ref" class="btn btn-ghost btn-sm">📊 wsrep-справочник</a>
+                    <a href="#doc-faq" class="btn btn-ghost btn-sm">❓ FAQ</a>
                 </div>
             </div>
 
@@ -2898,6 +2991,146 @@
 
                 </div>
             </div>
+
+            <!-- ─────────────────────────────────────────────────── -->
+            <!-- SECTION: WSREP СПРАВОЧНИК                              -->
+            <!-- ─────────────────────────────────────────────────── -->
+            <div class="doc-section" id="doc-wsrep-ref">
+                <div class="doc-section-title">
+                    <svg width="22" height="22" viewBox="0 0 24 24" fill="none" stroke="var(--color-primary)" stroke-width="2"><path d="M2 3h6a4 4 0 0 1 4 4v14a3 3 0 0 0-3-3H2z"/><path d="M22 3h-6a4 4 0 0 0-4 4v14a3 3 0 0 1 3-3h7z"/></svg>
+                    wsrep — Справочник переменных
+                </div>
+                <div style="overflow-x:auto">
+                <table style="width:100%;border-collapse:collapse;font-size:var(--text-sm)">
+                    <thead><tr style="background:var(--surface-2);border-bottom:2px solid var(--color-primary)">
+                        <th style="padding:8px 12px;text-align:left;font-weight:600;color:var(--color-primary);width:260px">Переменная</th>
+                        <th style="padding:8px 12px;text-align:left;font-weight:600;color:var(--text)">Описание</th>
+                        <th style="padding:8px 12px;text-align:left;font-weight:600;color:var(--text);width:160px">Норма</th>
+                    </tr></thead>
+                    <tbody>
+                    <tr style="border-bottom:1px solid var(--border)"><td style="padding:8px 12px"><code>wsrep_cluster_status</code></td><td style="padding:8px 12px">Статус участия в кворуме. <b>Primary</b> — кворум есть, запись разрешена. <b>non-Primary</b> — кластер разделён или нода потеряла связь.</td><td style="padding:8px 12px;color:var(--success)">Primary</td></tr>
+                    <tr style="border-bottom:1px solid var(--border);background:rgba(255,255,255,.02)"><td style="padding:8px 12px"><code>wsrep_local_state_comment</code></td><td style="padding:8px 12px"><b>Synced</b> — нода синхронизирована. <b>Donor/Desynced</b> — отдаёт SST-снимок. <b>Joining</b> — получает данные от донора. <b>Joined</b> — синхронизируется через IST.</td><td style="padding:8px 12px;color:var(--success)">Synced</td></tr>
+                    <tr style="border-bottom:1px solid var(--border)"><td style="padding:8px 12px"><code>wsrep_cluster_size</code></td><td style="padding:8px 12px">Количество нод в кворуме. Должно совпадать на всех нодах. Если меньше ожидаемого — нода выпала.</td><td style="padding:8px 12px">= N нод</td></tr>
+                    <tr style="border-bottom:1px solid var(--border);background:rgba(255,255,255,.02)"><td style="padding:8px 12px"><code>wsrep_flow_control_paused</code></td><td style="padding:8px 12px">Доля времени (0.0–1.0), когда репликация была приостановлена из-за перегрузки принимающей ноды. Значение > 0.1 — серьёзная проблема производительности.</td><td style="padding:8px 12px;color:var(--success)">&lt; 0.05</td></tr>
+                    <tr style="border-bottom:1px solid var(--border)"><td style="padding:8px 12px"><code>wsrep_local_recv_queue</code></td><td style="padding:8px 12px">Очередь входящих транзакций, ожидающих применения. Постоянно > 0 означает что нода не успевает применять транзакции.</td><td style="padding:8px 12px;color:var(--success)">0</td></tr>
+                    <tr style="border-bottom:1px solid var(--border);background:rgba(255,255,255,.02)"><td style="padding:8px 12px"><code>wsrep_local_send_queue</code></td><td style="padding:8px 12px">Очередь транзакций, ожидающих отправки в кластер. > 0 — проблема сети или перегрузка исходящего канала.</td><td style="padding:8px 12px;color:var(--success)">0</td></tr>
+                    <tr style="border-bottom:1px solid var(--border)"><td style="padding:8px 12px"><code>wsrep_cert_deps_distance</code></td><td style="padding:8px 12px">Среднее количество транзакций, которые можно применить параллельно. Чем выше — тем лучше используется параллелизм.</td><td style="padding:8px 12px">> 1.0</td></tr>
+                    <tr style="border-bottom:1px solid var(--border);background:rgba(255,255,255,.02)"><td style="padding:8px 12px"><code>wsrep_local_cert_failures</code></td><td style="padding:8px 12px">Число транзакций, отклонённых при сертификации из-за конфликтов. > 0 означает конкурирующую запись на разных нодах одновременно.</td><td style="padding:8px 12px;color:var(--success)">0</td></tr>
+                    <tr style="border-bottom:1px solid var(--border)"><td style="padding:8px 12px"><code>wsrep_bf_aborts</code></td><td style="padding:8px 12px">Число транзакций, прерванных механизмом Brute Force Abortion при конфликте репликации. Ненулевое значение нормально при высокой нагрузке.</td><td style="padding:8px 12px">&gt; 0 норма</td></tr>
+                    <tr style="border-bottom:1px solid var(--border);background:rgba(255,255,255,.02)"><td style="padding:8px 12px"><code>wsrep_cluster_conf_id</code></td><td style="padding:8px 12px">Порядковый номер конфигурации кластера. Увеличивается при каждом изменении состава нод. Должен быть одинаковым на всех нодах.</td><td style="padding:8px 12px">= на всех</td></tr>
+                    <tr style="border-bottom:1px solid var(--border)"><td style="padding:8px 12px"><code>wsrep_cluster_state_uuid</code></td><td style="padding:8px 12px">UUID состояния кластера. Должен совпадать на всех нодах. Расхождение означает Split-Brain — критическая ситуация.</td><td style="padding:8px 12px">= на всех</td></tr>
+                    <tr style="border-bottom:1px solid var(--border);background:rgba(255,255,255,.02)"><td style="padding:8px 12px"><code>wsrep_connected</code></td><td style="padding:8px 12px">ON — нода подключена к Galera-каналу. OFF — нода изолирована от кластера.</td><td style="padding:8px 12px;color:var(--success)">ON</td></tr>
+                    <tr style="border-bottom:1px solid var(--border)"><td style="padding:8px 12px"><code>wsrep_ready</code></td><td style="padding:8px 12px">ON — нода готова принимать клиентские запросы. OFF — нода в процессе синхронизации или восстановления.</td><td style="padding:8px 12px;color:var(--success)">ON</td></tr>
+                    <tr style="border-bottom:1px solid var(--border);background:rgba(255,255,255,.02)"><td style="padding:8px 12px"><code>wsrep_apply_oooe</code></td><td style="padding:8px 12px">Out-Of-Order Execution — доля транзакций, применённых не в том порядке в котором они были закоммичены. Высокое значение = хорошая параллельность.</td><td style="padding:8px 12px">→ выше лучше</td></tr>
+                    <tr style="border-bottom:1px solid var(--border)"><td style="padding:8px 12px"><code>wsrep_last_committed</code></td><td style="padding:8px 12px">Sequence number (seqno) последней применённой транзакции. Используется Bootstrap Wizard для выбора кандидата с наибольшим seqno.</td><td style="padding:8px 12px">монотонно растёт</td></tr>
+                    <tr style="background:rgba(255,255,255,.02)"><td style="padding:8px 12px"><code>wsrep_incoming_addresses</code></td><td style="padding:8px 12px">Список IP:порт всех нод, отправляющих транзакции в кластер. Полезно для проверки что все ноды видят друг друга.</td><td style="padding:8px 12px">все ноды</td></tr>
+                    </tbody>
+                </table>
+                </div>
+            </div>
+
+            <!-- ─────────────────────────────────────────────────── -->
+            <!-- SECTION: FAQ / ЧАСТЫЕ ВОПРОСЫ                          -->
+            <!-- ─────────────────────────────────────────────────── -->
+            <div class="doc-section" id="doc-faq">
+                <div class="doc-section-title">
+                    <svg width="22" height="22" viewBox="0 0 24 24" fill="none" stroke="var(--warning)" stroke-width="2"><circle cx="12" cy="12" r="10"/><path d="M9.09 9a3 3 0 0 1 5.83 1c0 2-3 3-3 3"/><line x1="12" y1="17" x2="12.01" y2="17"/></svg>
+                    FAQ — Частые вопросы
+                </div>
+                <div class="doc-grid">
+
+                    <div class="doc-card">
+                        <div class="doc-card-header">
+                            <div class="doc-btn-label">Кластер в non-Primary, что делать?</div>
+                            <span class="doc-category-badge cat-danger">Danger</span>
+                        </div>
+                        <div class="doc-desc">
+                            1. Проверьте <code>wsrep_cluster_size</code> — сколько нод видят друг друга.<br>
+                            2. Если большинство нод доступно — запустите недоступные ноды через <strong>Recovery → Bootstrap Wizard</strong>.<br>
+                            3. Если все ноды недоступны — выберите ноду с максимальным seqno (страница Recovery → Seqno), сделайте <code>safe_to_bootstrap: 1</code> и запустите <code>galera_new_cluster</code>.<br>
+                            4. Используйте <strong>pc.bootstrap</strong> через Recovery → pc.bootstrap если нода запущена, но не считает себя Primary.
+                        </div>
+                        <div class="doc-note">Причины: сетевой разрыв, split-brain, потеря кворума (нужно N/2+1 нод).</div>
+                    </div>
+
+                    <div class="doc-card">
+                        <div class="doc-card-header">
+                            <div class="doc-btn-label">Высокий Flow Control, что делать?</div>
+                            <span class="doc-category-badge cat-warning">Warning</span>
+                        </div>
+                        <div class="doc-desc">
+                            Flow Control означает что одна из нод не успевает применять транзакции:<br>
+                            1. Найдите ноду с высоким <code>wsrep_local_recv_queue</code> — это отстающая нода.<br>
+                            2. Проверьте нагрузку на диск (<em>Diagnostics → System Health</em>).<br>
+                            3. Повысьте <code>wsrep_slave_threads</code> (> 4) для параллельного применения.<br>
+                            4. Убедитесь что <code>wsrep_cert_deps_distance</code> > 1 (есть потенциал параллелизма).
+                        </div>
+                        <div class="doc-note">Смотрите в Справочнике выше: <code>wsrep_flow_control_paused</code>, <code>wsrep_local_recv_queue</code>, <code>wsrep_cert_deps_distance</code>.</div>
+                    </div>
+
+                    <div class="doc-card">
+                        <div class="doc-card-header">
+                            <div class="doc-btn-label">Как безопасно остановить ноду?</div>
+                            <span class="doc-category-badge cat-action">Action</span>
+                        </div>
+                        <div class="doc-desc">
+                            Используйте <strong>Maintenance Wizard</strong> (7 шагов):<br>
+                            1. R/O ON — переключить ноду в режим read_only<br>
+                            2. Дренаж — дождаться пока recv_queue = 0<br>
+                            3. Stop MariaDB — остановить сервис<br>
+                            4. Ваши работы — подтвердите завершение<br>
+                            5. Start MariaDB — запустить сервис<br>
+                            6. Ждать Synced<br>
+                            7. R/W ON — вернуть read_write
+                        </div>
+                        <div class="doc-note">Не делайте Stop на ноде без R/O и дренажа очереди — возможна потеря транзакций.</div>
+                    </div>
+
+                    <div class="doc-card">
+                        <div class="doc-card-header">
+                            <div class="doc-btn-label">Что такое SST и IST?</div>
+                            <span class="doc-category-badge cat-info">Info</span>
+                        </div>
+                        <div class="doc-desc">
+                            <strong>SST (State Snapshot Transfer)</strong> — полная передача снимка базы данных через rsync/xtrabackup/mariabackup. Используется при первом подключении или когда IST невозможен. Донор-нода переходит в Donor/Desynced и темпорально выходит из кворума.<br><br>
+                            <strong>IST (Incremental State Transfer)</strong> — передача только пропущенных событий из gcache. Быстрее SST, не затрагивает донора. Используется когда нода ненадолго отсутствовала.
+                        </div>
+                        <div class="doc-note"><strong>Прогресс SST</strong> виден на странице Обслуживание → SST Monitor.</div>
+                    </div>
+
+                    <div class="doc-card">
+                        <div class="doc-card-header">
+                            <div class="doc-btn-label">Что такое garbd (арбитр)?</div>
+                            <span class="doc-category-badge cat-info">Info</span>
+                        </div>
+                        <div class="doc-desc">
+                            <strong>garbd</strong> — Galera Arbitrator daemon. Лёгкий процесс (нет MariaDB), который участвует в голосовании кворума, но не хранит данных и не получает SST.
+                            Рекомендуется при чётном числе нод для предотвращения split-brain.<br><br>
+                            <strong>Установка:</strong><br>
+                            <code>apt install galera-arbitrator-4</code><br>
+                            <code>garbd --name garb1 --address gcomm://192.168.1.10,192.168.1.11 --group galera_cluster &amp;</code>
+                        </div>
+                        <div class="doc-note">Статус garbd проверяется через SSH: <code>systemctl is-active garbd</code>. Отображается на дашборде в разделе Арбитры.</div>
+                    </div>
+
+                    <div class="doc-card">
+                        <div class="doc-card-header">
+                            <div class="doc-btn-label">Нода не видит других (wsrep_cluster_size=1)</div>
+                            <span class="doc-category-badge cat-danger">Danger</span>
+                        </div>
+                        <div class="doc-desc">
+                            Если <code>wsrep_cluster_size=1</code> хотя нод должно быть больше:<br>
+                            1. Проверьте <code>wsrep_cluster_address</code> в galera.cnf — должны быть IP всех нод.<br>
+                            2. Проверьте открыты порты 3306, 4567, 4568, 4444 между нодами.<br>
+                            3. <em>Diagnostics → Compare galera.cnf</em> — проверьте расхождения конфигов.<br>
+                            4. В journald ноды ищите <code>WSREP</code> ошибки.
+                        </div>
+                        <div class="doc-note">Причины: firewall, неправильный wsrep_cluster_address, проблема сети между DC.</div>
+                    </div>
+
+                </div>
+            </div>
+
         </section>
 
 
@@ -4008,17 +4241,42 @@ var ClusterSelector = (function() {
                     '</div>' : '') +
                 '<div class="node-actions">' + rowMain + '</div>' +
                 '<div class="node-actions">' + rowExtra + '</div>' +
+                Sparklines.cardHtml(node.id) +
                 '</div>';
         }
 
-        // ---- NODES DETAIL PAGE (same grid as overview) ----
+        // ---- NODES DETAIL PAGE (same grid as overview + search filter) ----
         function renderNodesDetail() {
+            renderNodesDetailFiltered();
+        }
+
+        function renderNodesDetailFiltered() {
             var grid = document.getElementById('nodesDetailGrid');
             if (!grid) return;
-            // Рендерим расширенные карточки — те же что в overview
-            grid.innerHTML = clusterData.nodes.map(function(node) {
-                return nodeCardHtml(node);
-            }).join('');
+            var inp = document.getElementById('nodeSearchInput');
+            var q = inp ? inp.value.trim().toLowerCase() : '';
+            var nodes = clusterData.nodes || [];
+            var filtered = q ? nodes.filter(function(n) {
+                return (n.id   || '').toLowerCase().indexOf(q) !== -1 ||
+                       (n.name || '').toLowerCase().indexOf(q) !== -1 ||
+                       (n.host || '').toLowerCase().indexOf(q) !== -1 ||
+                       (n.dc   || '').toLowerCase().indexOf(q) !== -1 ||
+                       (n.state|| '').toLowerCase().indexOf(q) !== -1 ||
+                       ((n.metrics && n.metrics.wsrep_cluster_status) || '').toLowerCase().indexOf(q) !== -1;
+            }) : nodes;
+            grid.innerHTML = filtered.length
+                ? filtered.map(function(n) { return nodeCardHtml(n); }).join('')
+                : '<div style="padding:2rem;color:var(--text-muted);text-align:center">Нет нод, соответствующих поиску</div>';
+            var cnt = document.getElementById('nodeSearchCount');
+            if (cnt) cnt.textContent = q ? (filtered.length + ' из ' + nodes.length) : '';
+            var clr = document.getElementById('nodeSearchClear');
+            if (clr) clr.style.display = q ? '' : 'none';
+        }
+
+        function clearNodeSearch() {
+            var inp = document.getElementById('nodeSearchInput');
+            if (inp) { inp.value = ''; inp.focus(); }
+            renderNodesDetailFiltered();
         }
 
         // ---- TOPOLOGY ----
@@ -4840,6 +5098,8 @@ var ClusterSelector = (function() {
         // ---- RENDER ALL ----
         function renderAll() {
             updateHeaderStatus();
+            if (typeof Sparklines !== 'undefined') Sparklines.record(clusterData.nodes);
+            if (typeof NotifManager !== 'undefined') NotifManager.check(clusterData);
             renderKpis();
             renderNodesGrid();
             renderNodesDetail();
@@ -7777,5 +8037,179 @@ var ClusterSelector = (function() {
     })();
 
 </script>
+
+<!-- ============================================================
+     SPARKLINES — in-memory metric history, pure SVG, no deps
+     ============================================================ -->
+<script>
+var Sparklines = (function() {
+    var HISTORY = 50;   // ticks to keep
+    var _data = {};     // {nodeId: {fc: [0..1,...], rq: [0,1,...]}}
+
+    function _ensure(id) {
+        if (!_data[id]) _data[id] = { fc: [], rq: [] };
+    }
+
+    function record(nodes) {
+        if (!nodes) return;
+        nodes.forEach(function(n) {
+            _ensure(n.id);
+            var m = n.metrics || {};
+            var fc = parseFloat(m.wsrep_flow_control_paused) || 0;
+            var rq = parseInt(m.wsrep_local_recv_queue)      || 0;
+            _data[n.id].fc.push(fc); if (_data[n.id].fc.length > HISTORY) _data[n.id].fc.shift();
+            _data[n.id].rq.push(rq); if (_data[n.id].rq.length > HISTORY) _data[n.id].rq.shift();
+        });
+        // Update sparklines in DOM without full re-render
+        nodes.forEach(function(n) { _patch(n); });
+    }
+
+    function _svg(values, W, H, color, maxVal) {
+        if (!values || values.length < 2) return '<rect width="'+W+'" height="'+H+'" fill="none"/>';
+        var mx = maxVal > 0 ? maxVal : (Math.max.apply(null, values) || 1);
+        var pts = values.map(function(v, i) {
+            var x = (i / (values.length - 1)) * W;
+            var y = H - (v / mx) * (H - 2) - 1;
+            return x.toFixed(1) + ',' + y.toFixed(1);
+        }).join(' ');
+        return '<polyline points="'+pts+'" fill="none" stroke="'+color+'" stroke-width="1.5"'+
+               ' stroke-linecap="round" stroke-linejoin="round"/>';
+    }
+
+    function cardHtml(nodeId) {
+        return '<div class="sparkline-wrap" id="spark-'+nodeId+'">' +
+            _itemHtml(nodeId) + '</div>';
+    }
+
+    function _itemHtml(nodeId) {
+        var d = _data[nodeId] || { fc: [], rq: [] };
+        var fcLast = d.fc.length ? d.fc[d.fc.length-1] : 0;
+        var rqLast = d.rq.length ? d.rq[d.rq.length-1] : 0;
+        var fcCls  = fcLast > 0.05 ? 'warn' : 'ok';
+        var rqCls  = rqLast > 10   ? 'warn' : 'ok';
+        var W = 80, H = 24;
+        return '<div class="sparkline-item">' +
+            '<div class="sparkline-label">Flow Control</div>' +
+            '<div class="sparkline-value '+fcCls+'">' + fcLast.toFixed(3) + '</div>' +
+            '<svg class="sparkline-svg" viewBox="0 0 '+W+' '+H+'" height="'+H+'" preserveAspectRatio="none">' +
+            _svg(d.fc, W, H, fcLast > 0.05 ? '#bb653b' : '#6daa45', 1) + '</svg>' +
+            '</div>' +
+            '<div class="sparkline-item">' +
+            '<div class="sparkline-label">Recv Queue</div>' +
+            '<div class="sparkline-value '+rqCls+'">' + rqLast + '</div>' +
+            '<svg class="sparkline-svg" viewBox="0 0 '+W+' '+H+'" height="'+H+'" preserveAspectRatio="none">' +
+            _svg(d.rq, W, H, rqLast > 10 ? '#bb653b' : '#4f98a3', null) + '</svg>' +
+            '</div>';
+    }
+
+    function _patch(node) {
+        var el = document.getElementById('spark-' + node.id);
+        if (el) el.innerHTML = _itemHtml(node.id);
+    }
+
+    return { record: record, cardHtml: cardHtml };
+})();
+</script>
+
+<!-- ============================================================
+     NOTIFICATION MANAGER — Notification API, cluster degradation
+     ============================================================ -->
+<script>
+var NotifManager = (function() {
+    var _enabled  = false;
+    var _prevStatus = null;
+    var _prevFC     = 0;
+    var LS_KEY = 'galera_notif_enabled';
+
+    function _load() {
+        try { _enabled = localStorage.getItem(LS_KEY) === '1'; } catch(e) {}
+        var cb = document.getElementById('notifToggle');
+        if (cb) cb.checked = _enabled;
+    }
+
+    function toggle(on) {
+        if (on && Notification.permission === 'default') {
+            Notification.requestPermission().then(function(p) {
+                if (p === 'granted') {
+                    _enabled = true;
+                    _save();
+                    _send('✅ Galera Orchestrator', 'Уведомления включены. Оповещу при деградации кластера.');
+                } else {
+                    _enabled = false;
+                    var cb = document.getElementById('notifToggle');
+                    if (cb) cb.checked = false;
+                    if (typeof toast === 'function') toast('warning', 'Браузер заблокировал уведомления. Разрешите в настройках браузера.');
+                }
+            });
+        } else if (on && Notification.permission === 'granted') {
+            _enabled = true;
+            _save();
+            _send('✅ Galera Orchestrator', 'Уведомления включены.');
+        } else if (on && Notification.permission === 'denied') {
+            _enabled = false;
+            var cb = document.getElementById('notifToggle');
+            if (cb) cb.checked = false;
+            if (typeof toast === 'function') toast('warning', 'Уведомления заблокированы в браузере.');
+        } else {
+            _enabled = false;
+            _save();
+        }
+    }
+
+    function _save() {
+        try { localStorage.setItem(LS_KEY, _enabled ? '1' : '0'); } catch(e) {}
+        var cb = document.getElementById('notifToggle');
+        if (cb) cb.checked = _enabled;
+    }
+
+    function _send(title, body) {
+        if (Notification.permission !== 'granted') return;
+        try { new Notification(title, { body: body, icon: '/favicon.ico', tag: 'galera' }); }
+        catch(e) {}
+    }
+
+    function check(data) {
+        if (!_enabled || !data || !data.nodes) return;
+        var status = (data.nodes[0] && data.nodes[0].metrics &&
+                      data.nodes[0].metrics.wsrep_cluster_status) || 'unknown';
+        var fc = 0;
+        data.nodes.forEach(function(n) {
+            if (n.metrics) fc = Math.max(fc, parseFloat(n.metrics.wsrep_flow_control_paused) || 0);
+        });
+
+        // non-Primary alert
+        if (status !== 'Primary' && status !== 'unknown' && _prevStatus === 'Primary') {
+            _send('⚠️ Кластер → non-Primary',
+                  'Деградация: wsrep_cluster_status = ' + status + '. Запись заблокирована.');
+            if (typeof addLog === 'function') addLog('ERROR', 'Уведомление: кластер → ' + status);
+        }
+
+        // Flow control alert (crossing threshold 0.1)
+        if (fc > 0.1 && _prevFC <= 0.1) {
+            _send('⏳ Flow Control высокий',
+                  'fc_paused = ' + fc.toFixed(3) + ' (порог 0.1). Проблема производительности.');
+            if (typeof addLog === 'function') addLog('WARN', 'Уведомление: fc_paused = ' + fc.toFixed(3));
+        }
+
+        // Node offline alert
+        data.nodes.forEach(function(n) {
+            if (!n.online && n._prevOnline !== false) {
+                _send('❌ Нода недоступна: ' + (n.name || n.id),
+                      (n.host || '') + ' — ' + (n.error || 'ошибка подключения'));
+            }
+            n._prevOnline = n.online;
+        });
+
+        _prevStatus = status;
+        _prevFC     = fc;
+    }
+
+    document.addEventListener('DOMContentLoaded', _load);
+    if (document.readyState !== 'loading') _load();
+
+    return { toggle: toggle, check: check };
+})();
+</script>
+
 </body>
 </html>

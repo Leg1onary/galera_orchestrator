@@ -3399,22 +3399,6 @@
      JAVASCRIPT — все в одном IIFE, никаких async на верхнем уровне
      ============================================================ -->
 <script>
-    // ── Forward declarations (fixed hoisting for inline HTML handlers) ──
-    function renderNodesDetailFiltered() {
-        if (typeof _renderNodesDetailFiltered === 'function') _renderNodesDetailFiltered();
-    }
-    function clearNodeSearch() {
-        if (typeof _clearNodeSearch === 'function') _clearNodeSearch();
-    }
-    var NotifManager = {
-        toggle: function() {},
-        check:  function() {},
-        enable: function() {}
-    };
-    var Sparklines = {
-        record:  function() {},
-        cardHtml: function() { return ''; }
-    };
     // ============================================================
     // AUTH MANAGER — runs before the main IIFE, guards the whole app
     // ============================================================
@@ -4266,7 +4250,7 @@ var ClusterSelector = (function() {
             renderNodesDetailFiltered();
         }
 
-        function _renderNodesDetailFiltered() {
+        function renderNodesDetailFiltered() {
             var grid = document.getElementById('nodesDetailGrid');
             if (!grid) return;
             var inp = document.getElementById('nodeSearchInput');
@@ -4289,7 +4273,7 @@ var ClusterSelector = (function() {
             if (clr) clr.style.display = q ? '' : 'none';
         }
 
-        function _clearNodeSearch() {
+        function clearNodeSearch() {
             var inp = document.getElementById('nodeSearchInput');
             if (inp) { inp.value = ''; inp.focus(); }
             renderNodesDetailFiltered();

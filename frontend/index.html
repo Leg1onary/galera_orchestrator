@@ -3399,6 +3399,10 @@
      JAVASCRIPT — все в одном IIFE, никаких async на верхнем уровне
      ============================================================ -->
 <script>
+    var Sparklines = {
+        record: function() {},
+        cardHtml: function() { return ''; }
+    };
     // ============================================================
     // AUTH MANAGER — runs before the main IIFE, guards the whole app
     // ============================================================

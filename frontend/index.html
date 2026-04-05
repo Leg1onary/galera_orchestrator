@@ -8034,181 +8034,174 @@ var ClusterSelector = (function() {
         } else {
             setTimeout(fetchVersion, 800);
         }
-    })();
 
-</script>
 
-<!-- ============================================================
-     SPARKLINES — in-memory metric history, pure SVG, no deps
-     ============================================================ -->
-<script>
-var Sparklines = (function() {
-    var HISTORY = 50;   // ticks to keep
-    var _data = {};     // {nodeId: {fc: [0..1,...], rq: [0,1,...]}}
+        // ---- SPARKLINES ----
+        var Sparklines = (function() {
+            var HISTORY = 50;   // ticks to keep
+            var _data = {};     // {nodeId: {fc: [0..1,...], rq: [0,1,...]}}
 
-    function _ensure(id) {
-        if (!_data[id]) _data[id] = { fc: [], rq: [] };
-    }
+            function _ensure(id) {
+                if (!_data[id]) _data[id] = { fc: [], rq: [] };
+            }
 
-    function record(nodes) {
-        if (!nodes) return;
-        nodes.forEach(function(n) {
-            _ensure(n.id);
-            var m = n.metrics || {};
-            var fc = parseFloat(m.wsrep_flow_control_paused) || 0;
-            var rq = parseInt(m.wsrep_local_recv_queue)      || 0;
-            _data[n.id].fc.push(fc); if (_data[n.id].fc.length > HISTORY) _data[n.id].fc.shift();
-            _data[n.id].rq.push(rq); if (_data[n.id].rq.length > HISTORY) _data[n.id].rq.shift();
-        });
-        // Update sparklines in DOM without full re-render
-        nodes.forEach(function(n) { _patch(n); });
-    }
+            function record(nodes) {
+                if (!nodes) return;
+                nodes.forEach(function(n) {
+                    _ensure(n.id);
+                    var m = n.metrics || {};
+                    var fc = parseFloat(m.wsrep_flow_control_paused) || 0;
+                    var rq = parseInt(m.wsrep_local_recv_queue)      || 0;
+                    _data[n.id].fc.push(fc); if (_data[n.id].fc.length > HISTORY) _data[n.id].fc.shift();
+                    _data[n.id].rq.push(rq); if (_data[n.id].rq.length > HISTORY) _data[n.id].rq.shift();
+                });
+                // Update sparklines in DOM without full re-render
+                nodes.forEach(function(n) { _patch(n); });
+            }
 
-    function _svg(values, W, H, color, maxVal) {
-        if (!values || values.length < 2) return '<rect width="'+W+'" height="'+H+'" fill="none"/>';
-        var mx = maxVal > 0 ? maxVal : (Math.max.apply(null, values) || 1);
-        var pts = values.map(function(v, i) {
-            var x = (i / (values.length - 1)) * W;
-            var y = H - (v / mx) * (H - 2) - 1;
-            return x.toFixed(1) + ',' + y.toFixed(1);
-        }).join(' ');
-        return '<polyline points="'+pts+'" fill="none" stroke="'+color+'" stroke-width="1.5"'+
-               ' stroke-linecap="round" stroke-linejoin="round"/>';
-    }
+            function _svg(values, W, H, color, maxVal) {
+                if (!values || values.length < 2) return '<rect width="'+W+'" height="'+H+'" fill="none"/>';
+                var mx = maxVal > 0 ? maxVal : (Math.max.apply(null, values) || 1);
+                var pts = values.map(function(v, i) {
+                    var x = (i / (values.length - 1)) * W;
+                    var y = H - (v / mx) * (H - 2) - 1;
+                    return x.toFixed(1) + ',' + y.toFixed(1);
+                }).join(' ');
+                return '<polyline points="'+pts+'" fill="none" stroke="'+color+'" stroke-width="1.5"'+
+                       ' stroke-linecap="round" stroke-linejoin="round"/>';
+            }
 
-    function cardHtml(nodeId) {
-        return '<div class="sparkline-wrap" id="spark-'+nodeId+'">' +
-            _itemHtml(nodeId) + '</div>';
-    }
+            function cardHtml(nodeId) {
+                return '<div class="sparkline-wrap" id="spark-'+nodeId+'">' +
+                    _itemHtml(nodeId) + '</div>';
+            }
 
-    function _itemHtml(nodeId) {
-        var d = _data[nodeId] || { fc: [], rq: [] };
-        var fcLast = d.fc.length ? d.fc[d.fc.length-1] : 0;
-        var rqLast = d.rq.length ? d.rq[d.rq.length-1] : 0;
-        var fcCls  = fcLast > 0.05 ? 'warn' : 'ok';
-        var rqCls  = rqLast > 10   ? 'warn' : 'ok';
-        var W = 80, H = 24;
-        return '<div class="sparkline-item">' +
-            '<div class="sparkline-label">Flow Control</div>' +
-            '<div class="sparkline-value '+fcCls+'">' + fcLast.toFixed(3) + '</div>' +
-            '<svg class="sparkline-svg" viewBox="0 0 '+W+' '+H+'" height="'+H+'" preserveAspectRatio="none">' +
-            _svg(d.fc, W, H, fcLast > 0.05 ? '#bb653b' : '#6daa45', 1) + '</svg>' +
-            '</div>' +
-            '<div class="sparkline-item">' +
-            '<div class="sparkline-label">Recv Queue</div>' +
-            '<div class="sparkline-value '+rqCls+'">' + rqLast + '</div>' +
-            '<svg class="sparkline-svg" viewBox="0 0 '+W+' '+H+'" height="'+H+'" preserveAspectRatio="none">' +
-            _svg(d.rq, W, H, rqLast > 10 ? '#bb653b' : '#4f98a3', null) + '</svg>' +
-            '</div>';
-    }
+            function _itemHtml(nodeId) {
+                var d = _data[nodeId] || { fc: [], rq: [] };
+                var fcLast = d.fc.length ? d.fc[d.fc.length-1] : 0;
+                var rqLast = d.rq.length ? d.rq[d.rq.length-1] : 0;
+                var fcCls  = fcLast > 0.05 ? 'warn' : 'ok';
+                var rqCls  = rqLast > 10   ? 'warn' : 'ok';
+                var W = 80, H = 24;
+                return '<div class="sparkline-item">' +
+                    '<div class="sparkline-label">Flow Control</div>' +
+                    '<div class="sparkline-value '+fcCls+'">' + fcLast.toFixed(3) + '</div>' +
+                    '<svg class="sparkline-svg" viewBox="0 0 '+W+' '+H+'" height="'+H+'" preserveAspectRatio="none">' +
+                    _svg(d.fc, W, H, fcLast > 0.05 ? '#bb653b' : '#6daa45', 1) + '</svg>' +
+                    '</div>' +
+                    '<div class="sparkline-item">' +
+                    '<div class="sparkline-label">Recv Queue</div>' +
+                    '<div class="sparkline-value '+rqCls+'">' + rqLast + '</div>' +
+                    '<svg class="sparkline-svg" viewBox="0 0 '+W+' '+H+'" height="'+H+'" preserveAspectRatio="none">' +
+                    _svg(d.rq, W, H, rqLast > 10 ? '#bb653b' : '#4f98a3', null) + '</svg>' +
+                    '</div>';
+            }
 
-    function _patch(node) {
-        var el = document.getElementById('spark-' + node.id);
-        if (el) el.innerHTML = _itemHtml(node.id);
-    }
+            function _patch(node) {
+                var el = document.getElementById('spark-' + node.id);
+                if (el) el.innerHTML = _itemHtml(node.id);
+            }
 
-    return { record: record, cardHtml: cardHtml };
-})();
-</script>
+            return { record: record, cardHtml: cardHtml };
+        })();
 
-<!-- ============================================================
-     NOTIFICATION MANAGER — Notification API, cluster degradation
-     ============================================================ -->
-<script>
-var NotifManager = (function() {
-    var _enabled  = false;
-    var _prevStatus = null;
-    var _prevFC     = 0;
-    var LS_KEY = 'galera_notif_enabled';
+        // ---- NOTIFICATION MANAGER ----
+        var NotifManager = (function() {
+            var _enabled  = false;
+            var _prevStatus = null;
+            var _prevFC     = 0;
+            var LS_KEY = 'galera_notif_enabled';
 
-    function _load() {
-        try { _enabled = localStorage.getItem(LS_KEY) === '1'; } catch(e) {}
-        var cb = document.getElementById('notifToggle');
-        if (cb) cb.checked = _enabled;
-    }
+            function _load() {
+                try { _enabled = localStorage.getItem(LS_KEY) === '1'; } catch(e) {}
+                var cb = document.getElementById('notifToggle');
+                if (cb) cb.checked = _enabled;
+            }
 
-    function toggle(on) {
-        if (on && Notification.permission === 'default') {
-            Notification.requestPermission().then(function(p) {
-                if (p === 'granted') {
+            function toggle(on) {
+                if (on && Notification.permission === 'default') {
+                    Notification.requestPermission().then(function(p) {
+                        if (p === 'granted') {
+                            _enabled = true;
+                            _save();
+                            _send('✅ Galera Orchestrator', 'Уведомления включены. Оповещу при деградации кластера.');
+                        } else {
+                            _enabled = false;
+                            var cb = document.getElementById('notifToggle');
+                            if (cb) cb.checked = false;
+                            if (typeof toast === 'function') toast('warning', 'Браузер заблокировал уведомления. Разрешите в настройках браузера.');
+                        }
+                    });
+                } else if (on && Notification.permission === 'granted') {
                     _enabled = true;
                     _save();
-                    _send('✅ Galera Orchestrator', 'Уведомления включены. Оповещу при деградации кластера.');
-                } else {
+                    _send('✅ Galera Orchestrator', 'Уведомления включены.');
+                } else if (on && Notification.permission === 'denied') {
                     _enabled = false;
                     var cb = document.getElementById('notifToggle');
                     if (cb) cb.checked = false;
-                    if (typeof toast === 'function') toast('warning', 'Браузер заблокировал уведомления. Разрешите в настройках браузера.');
+                    if (typeof toast === 'function') toast('warning', 'Уведомления заблокированы в браузере.');
+                } else {
+                    _enabled = false;
+                    _save();
                 }
-            });
-        } else if (on && Notification.permission === 'granted') {
-            _enabled = true;
-            _save();
-            _send('✅ Galera Orchestrator', 'Уведомления включены.');
-        } else if (on && Notification.permission === 'denied') {
-            _enabled = false;
-            var cb = document.getElementById('notifToggle');
-            if (cb) cb.checked = false;
-            if (typeof toast === 'function') toast('warning', 'Уведомления заблокированы в браузере.');
-        } else {
-            _enabled = false;
-            _save();
-        }
-    }
-
-    function _save() {
-        try { localStorage.setItem(LS_KEY, _enabled ? '1' : '0'); } catch(e) {}
-        var cb = document.getElementById('notifToggle');
-        if (cb) cb.checked = _enabled;
-    }
-
-    function _send(title, body) {
-        if (Notification.permission !== 'granted') return;
-        try { new Notification(title, { body: body, icon: '/favicon.ico', tag: 'galera' }); }
-        catch(e) {}
-    }
-
-    function check(data) {
-        if (!_enabled || !data || !data.nodes) return;
-        var status = (data.nodes[0] && data.nodes[0].metrics &&
-                      data.nodes[0].metrics.wsrep_cluster_status) || 'unknown';
-        var fc = 0;
-        data.nodes.forEach(function(n) {
-            if (n.metrics) fc = Math.max(fc, parseFloat(n.metrics.wsrep_flow_control_paused) || 0);
-        });
-
-        // non-Primary alert
-        if (status !== 'Primary' && status !== 'unknown' && _prevStatus === 'Primary') {
-            _send('⚠️ Кластер → non-Primary',
-                  'Деградация: wsrep_cluster_status = ' + status + '. Запись заблокирована.');
-            if (typeof addLog === 'function') addLog('ERROR', 'Уведомление: кластер → ' + status);
-        }
-
-        // Flow control alert (crossing threshold 0.1)
-        if (fc > 0.1 && _prevFC <= 0.1) {
-            _send('⏳ Flow Control высокий',
-                  'fc_paused = ' + fc.toFixed(3) + ' (порог 0.1). Проблема производительности.');
-            if (typeof addLog === 'function') addLog('WARN', 'Уведомление: fc_paused = ' + fc.toFixed(3));
-        }
-
-        // Node offline alert
-        data.nodes.forEach(function(n) {
-            if (!n.online && n._prevOnline !== false) {
-                _send('❌ Нода недоступна: ' + (n.name || n.id),
-                      (n.host || '') + ' — ' + (n.error || 'ошибка подключения'));
             }
-            n._prevOnline = n.online;
-        });
 
-        _prevStatus = status;
-        _prevFC     = fc;
-    }
+            function _save() {
+                try { localStorage.setItem(LS_KEY, _enabled ? '1' : '0'); } catch(e) {}
+                var cb = document.getElementById('notifToggle');
+                if (cb) cb.checked = _enabled;
+            }
 
-    document.addEventListener('DOMContentLoaded', _load);
-    if (document.readyState !== 'loading') _load();
+            function _send(title, body) {
+                if (Notification.permission !== 'granted') return;
+                try { new Notification(title, { body: body, icon: '/favicon.ico', tag: 'galera' }); }
+                catch(e) {}
+            }
 
-    return { toggle: toggle, check: check };
-})();
+            function check(data) {
+                if (!_enabled || !data || !data.nodes) return;
+                var status = (data.nodes[0] && data.nodes[0].metrics &&
+                              data.nodes[0].metrics.wsrep_cluster_status) || 'unknown';
+                var fc = 0;
+                data.nodes.forEach(function(n) {
+                    if (n.metrics) fc = Math.max(fc, parseFloat(n.metrics.wsrep_flow_control_paused) || 0);
+                });
+
+                // non-Primary alert
+                if (status !== 'Primary' && status !== 'unknown' && _prevStatus === 'Primary') {
+                    _send('⚠️ Кластер → non-Primary',
+                          'Деградация: wsrep_cluster_status = ' + status + '. Запись заблокирована.');
+                    if (typeof addLog === 'function') addLog('ERROR', 'Уведомление: кластер → ' + status);
+                }
+
+                // Flow control alert (crossing threshold 0.1)
+                if (fc > 0.1 && _prevFC <= 0.1) {
+                    _send('⏳ Flow Control высокий',
+                          'fc_paused = ' + fc.toFixed(3) + ' (порог 0.1). Проблема производительности.');
+                    if (typeof addLog === 'function') addLog('WARN', 'Уведомление: fc_paused = ' + fc.toFixed(3));
+                }
+
+                // Node offline alert
+                data.nodes.forEach(function(n) {
+                    if (!n.online && n._prevOnline !== false) {
+                        _send('❌ Нода недоступна: ' + (n.name || n.id),
+                              (n.host || '') + ' — ' + (n.error || 'ошибка подключения'));
+                    }
+                    n._prevOnline = n.online;
+                });
+
+                _prevStatus = status;
+                _prevFC     = fc;
+            }
+
+            document.addEventListener('DOMContentLoaded', _load);
+            if (document.readyState !== 'loading') _load();
+
+            return { toggle: toggle, check: check };
+        })();
+    })();
+
 </script>
 
 </body>

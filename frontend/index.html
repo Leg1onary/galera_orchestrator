@@ -3223,13 +3223,14 @@
 
         // ---- DATA MODEL ----
         // Эталон mock-данных — восстанавливается при переключении real→mock
+        // Соответствует nodes.example.yaml: 4 ноды (2×DC1 + 2×DC2), 2 арбитра
         var MOCK_DEFAULT = {
             nodes: [
                 {
-                    id: 'gc01', name: 'gc01', host: '10.0.0.11', port: 3306, ssh: 22,
-                    role: 'node', state: 'Synced', read_only: false,
+                    id: 'gc01', name: 'gc01', host: '192.168.1.10', port: 3306, ssh_port: 22,
+                    dc: 'DC1', role: 'node', state: 'Synced', read_only: false,
                     metrics: {
-                        wsrep_cluster_status: 'Primary', wsrep_cluster_size: '2',
+                        wsrep_cluster_status: 'Primary', wsrep_cluster_size: '4',
                         wsrep_connected: 'ON', wsrep_ready: 'ON',
                         wsrep_local_state_comment: 'Synced',
                         wsrep_local_recv_queue: '0', wsrep_local_send_queue: '0',
@@ -3239,10 +3240,10 @@
                     }
                 },
                 {
-                    id: 'gc02', name: 'gc02', host: '10.0.0.12', port: 3306, ssh: 22,
-                    role: 'node', state: 'Synced', read_only: false,
+                    id: 'gc02', name: 'gc02', host: '192.168.1.11', port: 3306, ssh_port: 22,
+                    dc: 'DC1', role: 'node', state: 'Synced', read_only: false,
                     metrics: {
-                        wsrep_cluster_status: 'Primary', wsrep_cluster_size: '2',
+                        wsrep_cluster_status: 'Primary', wsrep_cluster_size: '4',
                         wsrep_connected: 'ON', wsrep_ready: 'ON',
                         wsrep_local_state_comment: 'Synced',
                         wsrep_local_recv_queue: '0', wsrep_local_send_queue: '0',
@@ -3250,14 +3251,45 @@
                         wsrep_last_committed: '104521',
                         wsrep_replicated_bytes: '2.0 MB', wsrep_received_bytes: '2.1 MB'
                     }
+                },
+                {
+                    id: 'gc03', name: 'gc03', host: '192.168.2.10', port: 3306, ssh_port: 22,
+                    dc: 'DC2', role: 'node', state: 'Synced', read_only: false,
+                    metrics: {
+                        wsrep_cluster_status: 'Primary', wsrep_cluster_size: '4',
+                        wsrep_connected: 'ON', wsrep_ready: 'ON',
+                        wsrep_local_state_comment: 'Synced',
+                        wsrep_local_recv_queue: '0', wsrep_local_send_queue: '0',
+                        wsrep_flow_control_paused: '0.000', wsrep_cert_deps_distance: '1.52',
+                        wsrep_last_committed: '104521',
+                        wsrep_replicated_bytes: '2.0 MB', wsrep_received_bytes: '2.1 MB'
+                    }
+                },
+                {
+                    id: 'gc04', name: 'gc04', host: '192.168.2.11', port: 3306, ssh_port: 22,
+                    dc: 'DC2', role: 'node', state: 'Synced', read_only: false,
+                    metrics: {
+                        wsrep_cluster_status: 'Primary', wsrep_cluster_size: '4',
+                        wsrep_connected: 'ON', wsrep_ready: 'ON',
+                        wsrep_local_state_comment: 'Synced',
+                        wsrep_local_recv_queue: '0', wsrep_local_send_queue: '0',
+                        wsrep_flow_control_paused: '0.000', wsrep_cert_deps_distance: '1.46',
+                        wsrep_last_committed: '104521',
+                        wsrep_replicated_bytes: '2.1 MB', wsrep_received_bytes: '2.0 MB'
+                    }
                 }
             ],
             arbitrator: null,
             arbitrators: [
                 {
-                    id: 'arb_dc1', host: '10.0.0.14', ssh_port: 22,
-                    ssh_user: 'root', ssh_key: '~/.ssh/id_rsa',
-                    dc: 'DC1', enabled: true
+                    id: 'arb01', host: '192.168.1.12', ssh_port: 22,
+                    ssh_user: 'root', ssh_key: '/home/user/.ssh/id_rsa',
+                    dc: 'DC1', enabled: true, online: true, members: 4, last_seen_sec: 0
+                },
+                {
+                    id: 'arb02', host: '192.168.2.12', ssh_port: 22,
+                    ssh_user: 'root', ssh_key: '/home/user/.ssh/id_rsa',
+                    dc: 'DC2', enabled: true, online: true, members: 4, last_seen_sec: 0
                 }
             ],
         };
@@ -3277,44 +3309,48 @@
         // ---- SCENARIOS ----
         var scenarios = {
             normal: function() {
-                clusterData.nodes[0].state = 'Synced';
-                clusterData.nodes[0].metrics.wsrep_cluster_status = 'Primary';
-                clusterData.nodes[0].metrics.wsrep_cluster_size = '2';
-                clusterData.nodes[0].metrics.wsrep_connected = 'ON';
-                clusterData.nodes[0].metrics.wsrep_ready = 'ON';
-                clusterData.nodes[0].metrics.wsrep_local_state_comment = 'Synced';
-                clusterData.nodes[0].metrics.wsrep_flow_control_paused = '0.000';
-                clusterData.nodes[1].state = 'Synced';
-                clusterData.nodes[1].metrics.wsrep_cluster_status = 'Primary';
-                clusterData.nodes[1].metrics.wsrep_cluster_size = '2';
-                clusterData.nodes[1].metrics.wsrep_connected = 'ON';
-                clusterData.nodes[1].metrics.wsrep_ready = 'ON';
-                clusterData.nodes[1].metrics.wsrep_local_state_comment = 'Synced';
-                clusterData.nodes[1].metrics.wsrep_flow_control_paused = '0.000';
-                addLog('OK', 'Кластер в норме. Обе ноды Synced, Primary.');
+                var sz = String(clusterData.nodes.length);
+                clusterData.nodes.forEach(function(nd) {
+                    nd.state = 'Synced';
+                    nd.metrics.wsrep_cluster_status      = 'Primary';
+                    nd.metrics.wsrep_cluster_size        = sz;
+                    nd.metrics.wsrep_connected           = 'ON';
+                    nd.metrics.wsrep_ready               = 'ON';
+                    nd.metrics.wsrep_local_state_comment = 'Synced';
+                    nd.metrics.wsrep_flow_control_paused = '0.000';
+                });
+                addLog('OK', 'Кластер в норме. Все ' + sz + ' ноды Synced, Primary.');
             },
             gc01_down: function() {
+                var remaining = String(clusterData.nodes.length - 1);
                 clusterData.nodes[0].state = 'Offline';
-                clusterData.nodes[0].metrics.wsrep_cluster_status = 'Disconnected';
-                clusterData.nodes[0].metrics.wsrep_cluster_size = '0';
-                clusterData.nodes[0].metrics.wsrep_connected = 'OFF';
-                clusterData.nodes[0].metrics.wsrep_ready = 'OFF';
+                clusterData.nodes[0].metrics.wsrep_cluster_status      = 'Disconnected';
+                clusterData.nodes[0].metrics.wsrep_cluster_size        = '0';
+                clusterData.nodes[0].metrics.wsrep_connected           = 'OFF';
+                clusterData.nodes[0].metrics.wsrep_ready               = 'OFF';
                 clusterData.nodes[0].metrics.wsrep_local_state_comment = 'Disconnected';
-                clusterData.nodes[1].metrics.wsrep_cluster_status = 'non-Primary';
-                clusterData.nodes[1].metrics.wsrep_cluster_size = '1';
-                addLog('ERROR', 'gc01 недоступна. Кластер потерял кворум → non-Primary.');
+                // remaining nodes lose quorum only if no arbitrator covers the DC
+                clusterData.nodes.slice(1).forEach(function(nd) {
+                    nd.metrics.wsrep_cluster_status = 'non-Primary';
+                    nd.metrics.wsrep_cluster_size   = remaining;
+                });
+                addLog('ERROR', 'gc01 недоступна. Кластер → non-Primary (' + remaining + ' нод онлайн).');
                 addLog('WARN', 'Запись заблокирована до восстановления кворума.');
             },
             gc02_down: function() {
+                var remaining = String(clusterData.nodes.length - 1);
                 clusterData.nodes[1].state = 'Offline';
-                clusterData.nodes[1].metrics.wsrep_cluster_status = 'Disconnected';
-                clusterData.nodes[1].metrics.wsrep_cluster_size = '0';
-                clusterData.nodes[1].metrics.wsrep_connected = 'OFF';
-                clusterData.nodes[1].metrics.wsrep_ready = 'OFF';
+                clusterData.nodes[1].metrics.wsrep_cluster_status      = 'Disconnected';
+                clusterData.nodes[1].metrics.wsrep_cluster_size        = '0';
+                clusterData.nodes[1].metrics.wsrep_connected           = 'OFF';
+                clusterData.nodes[1].metrics.wsrep_ready               = 'OFF';
                 clusterData.nodes[1].metrics.wsrep_local_state_comment = 'Disconnected';
-                clusterData.nodes[0].metrics.wsrep_cluster_status = 'non-Primary';
-                clusterData.nodes[0].metrics.wsrep_cluster_size = '1';
-                addLog('ERROR', 'gc02 недоступна. Кластер потерял кворум → non-Primary.');
+                var others = clusterData.nodes.filter(function(_, i) { return i !== 1; });
+                others.forEach(function(nd) {
+                    nd.metrics.wsrep_cluster_status = 'non-Primary';
+                    nd.metrics.wsrep_cluster_size   = remaining;
+                });
+                addLog('ERROR', 'gc02 недоступна. Кластер → non-Primary (' + remaining + ' нод онлайн).');
                 addLog('WARN', 'Запись заблокирована до восстановления кворума.');
             },
             flow_control: function() {

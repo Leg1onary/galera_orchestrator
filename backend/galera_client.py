@@ -51,8 +51,9 @@ def get_cluster_status(cfg: dict) -> dict:
     enabled_nodes = [n for n in nodes_cfg if n.get("enabled", True)]
 
     if USE_MOCK(cfg):
+        cluster_size = len(enabled_nodes)
         for n in enabled_nodes:
-            results.append(mock_node_status(n["id"], n))
+            results.append(mock_node_status(n["id"], n, cluster_size=cluster_size, all_nodes=enabled_nodes))
     else:
         from concurrent.futures import ThreadPoolExecutor, as_completed
         ordered = {n["id"]: None for n in enabled_nodes}

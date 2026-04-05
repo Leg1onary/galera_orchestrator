@@ -21,10 +21,16 @@ def _node_base_seqno(node_id: str) -> int:
     return 485730 + sum(ord(c) for c in node_id) % 20
 
 
-def node_status(node_id: str, node: dict) -> dict:
+def node_status(node_id: str, node: dict, cluster_size: int = 2, all_nodes: list | None = None) -> dict:
     elapsed = int(time.time() - _start)
     base_seqno = _node_base_seqno(node_id)
     commits = base_seqno + elapsed * 3
+
+    # Build incoming_addresses from actual node list when available
+    if all_nodes:
+        incoming = ",".join(n.get("host", "127.0.0.1") + ":4567" for n in all_nodes)
+    else:
+        incoming = node.get("host", "10.0.0.10") + ":4567"
 
     base = {
         "id":   node_id,
@@ -35,7 +41,7 @@ def node_status(node_id: str, node: dict) -> dict:
         "wsrep_local_state_comment": "Synced",
         "wsrep_connected":           "ON",
         "wsrep_ready":               "ON",
-        "wsrep_cluster_size":        2,
+        "wsrep_cluster_size":        cluster_size,
         "wsrep_local_send_queue":    0,
         "wsrep_local_recv_queue":    0,
         "wsrep_flow_control_paused": "0.00",
@@ -46,7 +52,7 @@ def node_status(node_id: str, node: dict) -> dict:
         "wsrep_apply_oooe":          round(random.uniform(0, 0.05), 4),
         "wsrep_cluster_conf_id":     12,
         "wsrep_cluster_state_uuid":  "5a7b1c2d-dead-beef-cafe-0123456789ab",
-        "wsrep_incoming_addresses":  ",".join([node.get("host", "10.0.0.10") + ":4567"] + ["10.0.0.1%d:4567" % x for x in range(1, 3)]),
+        "wsrep_incoming_addresses":  incoming,
         "wsrep_gcomm_uuid":          "5a7b1c2d-dead-beef-cafe-0123456789ab",
         "wsrep_protocol_version":    "9",
         "read_only":             False,

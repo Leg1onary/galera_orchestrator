@@ -4241,7 +4241,7 @@ var ClusterSelector = (function() {
                     '</div>' : '') +
                 '<div class="node-actions">' + rowMain + '</div>' +
                 '<div class="node-actions">' + rowExtra + '</div>' +
-                Sparklines.cardHtml(node.id) +
+                (typeof Sparklines !== 'undefined' ? Sparklines.cardHtml(node.id) : '') +
                 '</div>';
         }
 
@@ -7126,6 +7126,8 @@ var ClusterSelector = (function() {
         // ── Sprint A: bridge internals to global scope for inline onclick + Diag module ──
         window.BsWizard      = BsWizard;
         window.maintInitNode = maintInitNode;
+        window.renderNodesDetailFiltered = renderNodesDetailFiltered;
+        window.clearNodeSearch           = clearNodeSearch;
         window._diagBridge   = {
             get clusterData()  { return clusterData; },
             set clusterData(v) { clusterData = v; },
@@ -8200,8 +8202,35 @@ var ClusterSelector = (function() {
 
             return { toggle: toggle, check: check };
         })();
+
+        window.Sparklines   = Sparklines;
+        window.NotifManager = NotifManager;
+
     })();
 
+
+    // ── Bind inline handlers via addEventListener (after all declarations) ──
+    document.addEventListener('DOMContentLoaded', function() {
+        var searchInput = document.getElementById('nodeSearchInput');
+        var searchClear = document.getElementById('nodeSearchClear');
+        var notifToggle = document.getElementById('notifToggle');
+
+        if (searchInput) {
+            searchInput.addEventListener('input', function() {
+                renderNodesDetailFiltered();
+            });
+        }
+        if (searchClear) {
+            searchClear.addEventListener('click', function() {
+                clearNodeSearch();
+            });
+        }
+        if (notifToggle) {
+            notifToggle.addEventListener('change', function() {
+                NotifManager.toggle(this.checked);
+            });
+        }
+    });
 </script>
 
 </body>

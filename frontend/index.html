@@ -6163,40 +6163,40 @@ var ClusterSelector = (function() {
                             html += '<div style="font-size:var(--text-xs);text-transform:uppercase;letter-spacing:.5px;' +
                                 'color:var(--text-muted);margin-bottom:var(--space-1)">' + targetContour + '</div>';
                             clusters.forEach(function(cluName, idx) {
-    var isActive = (targetContour === (active._contour || sel.contour))
-                && idx === (active._index !== undefined ? active._index : sel.cluster_index);
-    html += '<div style="display:flex;align-items:center;gap:var(--space-2);padding:var(--space-2) var(--space-3);' +
-        'background:var(--surface-2);border:1px solid ' + (isActive ? 'var(--color-primary)' : 'var(--border)') + ';' +
-        'border-radius:var(--radius-md);margin-bottom:4px;">' +
-        // Индикатор + имя (клик — выбор кластера)
-        '<span style="width:8px;height:8px;border-radius:50%;flex-shrink:0;cursor:pointer;background:' +
-        (isActive ? 'var(--color-primary)' : 'var(--color-text-faint)') + '" ' +
-        'onclick="ClusterSelector.selectContour(\'' + targetContour + '\');' +
-        'document.getElementById(\'clusterSelect\').value=\'' + idx + '\';' +
-        'ClusterSelector.selectCluster(\'' + idx + '\')"></span>' +
-        '<span style="flex:1;font-size:var(--text-sm);color:var(--text);font-weight:' +
-        (isActive ? '600' : '400') + ';cursor:pointer" ' +
-        'onclick="ClusterSelector.selectContour(\'' + targetContour + '\');' +
-        'document.getElementById(\'clusterSelect\').value=\'' + idx + '\';' +
-        'ClusterSelector.selectCluster(\'' + idx + '\')">' + cluName + '</span>' +
-        (isActive ? '<span style="font-size:0.65rem;color:var(--color-primary);font-weight:700;margin-right:4px">Активный</span>' : '') +
-        // Кнопка «Изменить»
-        '<button class="btn btn-ghost btn-sm" title="Переименовать кластер" ' +
-        'onclick="App.renameCluster(\'' + targetContour + '\',' + idx + ',\'' + cluName + '\')">' +
-        '<svg width="13" height="13" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2.5">' +
-        '<path d="M11 4H4a2 2 0 0 0-2 2v14a2 2 0 0 0 2 2h14a2 2 0 0 0 2-2v-7"/>' +
-        '<path d="M18.5 2.5a2.121 2.121 0 0 1 3 3L12 15l-4 1 1-4 9.5-9.5z"/></svg>' +
-        ' Изменить</button>' +
-        // Кнопка «Удалить» (активный кластер нельзя удалить)
-        '<button class="btn btn-danger btn-sm" title="' + (isActive ? 'Нельзя удалить активный кластер' : 'Удалить кластер') + '" ' +
-        (isActive ? 'disabled style="opacity:.4;cursor:not-allowed"' : '') +
-        ' onclick="App.deleteCluster(\'' + targetContour + '\',' + idx + ',\'' + cluName + '\')">' +
-        '<svg width="13" height="13" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2.5">' +
-        '<polyline points="3 6 5 6 21 6"/><path d="M19 6l-1 14a2 2 0 0 1-2 2H8a2 2 0 0 1-2-2L5 6"/>' +
-        '<path d="M10 11v6"/><path d="M14 11v6"/></svg>' +
-        ' Удалить</button>' +
-        '</div>';
-});
+                        var isActive = (targetContour === (active._contour || sel.contour))
+                        && idx === (active._index !== undefined ? active._index : sel.cluster_index);
+                        html += '<div style="display:flex;align-items:center;gap:var(--space-2);padding:var(--space-2) var(--space-3);' +
+                        'background:var(--surface-2);border:1px solid ' + (isActive ? 'var(--color-primary)' : 'var(--border)') + ';' +
+                        'border-radius:var(--radius-md);margin-bottom:4px;">' +
+                        // Индикатор + имя (клик — выбор кластера)
+                        '<span style="width:8px;height:8px;border-radius:50%;flex-shrink:0;cursor:pointer;background:' +
+                        (isActive ? 'var(--color-primary)' : 'var(--color-text-faint)') + '" ' +
+                        'onclick="ClusterSelector.selectContour(\'' + targetContour + '\');' +
+                        'document.getElementById(\'clusterSelect\').value=\'' + idx + '\';' +
+                        'ClusterSelector.selectCluster(\'' + idx + '\')"></span>' +
+                        '<span style="flex:1;font-size:var(--text-sm);color:var(--text);font-weight:' +
+                        (isActive ? '600' : '400') + ';cursor:pointer" ' +
+                        'onclick="ClusterSelector.selectContour(\'' + targetContour + '\');' +
+                        'document.getElementById(\'clusterSelect\').value=\'' + idx + '\';' +
+                        'ClusterSelector.selectCluster(\'' + idx + '\')">' + cluName + '</span>' +
+                        (isActive ? '<span style="font-size:0.65rem;color:var(--color-primary);font-weight:700;margin-right:4px">Активный</span>' : '') +
+                        // Кнопка «Изменить»
+                        '<button class="btn btn-ghost btn-sm" title="Переименовать кластер" ' +
+                        'onclick="App.renameCluster(\'' + targetContour + '\',' + idx + ',\'' + cluName + '\')">' +
+                        '<svg width="13" height="13" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2.5">' +
+                        '<path d="M11 4H4a2 2 0 0 0-2 2v14a2 2 0 0 0 2 2h14a2 2 0 0 0 2-2v-7"/>' +
+                        '<path d="M18.5 2.5a2.121 2.121 0 0 1 3 3L12 15l-4 1 1-4 9.5-9.5z"/></svg>' +
+                        ' Изменить</button>' +
+                        // Кнопка «Удалить» (активный кластер нельзя удалить)
+                        '<button class="btn btn-danger btn-sm" title="' + (isActive ? 'Нельзя удалить активный кластер' : 'Удалить кластер') + '" ' +
+                        (isActive ? 'disabled style="opacity:.4;cursor:not-allowed"' : '') +
+                        ' onclick="App.deleteCluster(\'' + targetContour + '\',' + idx + ',\'' + cluName + '\')">' +
+                        '<svg width="13" height="13" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2.5">' +
+                        '<polyline points="3 6 5 6 21 6"/><path d="M19 6l-1 14a2 2 0 0 1-2 2H8a2 2 0 0 1-2-2L5 6"/>' +
+                        '<path d="M10 11v6"/><path d="M14 11v6"/></svg>' +
+                        ' Удалить</button>' +
+                        '</div>';
+                        });
                             html += '</div>';
                         }
 
@@ -6238,43 +6238,43 @@ var ClusterSelector = (function() {
             },
 			
 			renameCluster: function(contour, idx, currentName) {
-    var newName = prompt('Новое название кластера:', currentName);
-    if (!newName || !newName.trim() || newName.trim() === currentName) return;
-    fetch('/api/contours/' + contour + '/cluster/' + idx, {
-        method: 'PATCH',
-        headers: {'Content-Type': 'application/json'},
-        body: JSON.stringify({name: newName.trim()})
-    })
-    .then(function(r) { return r.json(); })
-    .then(function(d) {
-        if (d.ok) {
-            toast('success', 'Кластер переименован: ' + currentName + ' → ' + d.name);
-            addLog('INFO', 'Кластер переименован: ' + currentName + ' → ' + d.name + ' (' + contour + ')');
-            App.renderClusterList();
-            renderSettingsNodes();
-        } else {
-            toast('error', d.detail || 'Ошибка переименования');
-        }
-    })
-    .catch(function(e) { toast('error', 'Ошибка: ' + e.message); });
-},
+                var newName = prompt('Новое название кластера:', currentName);
+                if (!newName || !newName.trim() || newName.trim() === currentName) return;
+                    fetch('/api/contours/' + contour + '/cluster/' + idx, {
+                        method: 'PATCH',
+                        headers: {'Content-Type': 'application/json'},
+                        body: JSON.stringify({name: newName.trim()})
+                    })
+                .then(function(r) { return r.json(); })
+                .then(function(d) {
+                if (d.ok) {
+                    toast('success', 'Кластер переименован: ' + currentName + ' → ' + d.name);
+                    addLog('INFO', 'Кластер переименован: ' + currentName + ' → ' + d.name + ' (' + contour + ')');
+                    App.renderClusterList();
+                    renderSettingsNodes();
+                } else {
+                    toast('error', d.detail || 'Ошибка переименования');
+                }
+                })
+            .catch(function(e) { toast('error', 'Ошибка: ' + e.message); });
+            },
 
-deleteCluster: function(contour, idx, name) {
-    if (!confirm('Удалить кластер «' + name + '» из контура ' + contour.toUpperCase() + '?\nЭто действие необратимо.')) return;
-    fetch('/api/contours/' + contour + '/cluster/' + idx, { method: 'DELETE' })
-    .then(function(r) { return r.json(); })
-    .then(function(d) {
-        if (d.ok) {
-            toast('success', 'Кластер «' + name + '» удалён');
-            addLog('INFO', 'Удалён кластер: ' + name + ' (' + contour + ')');
-            App.renderClusterList();
-            renderSettingsNodes();
-        } else {
-            toast('error', d.detail || 'Ошибка удаления');
-        }
-    })
-    .catch(function(e) { toast('error', 'Ошибка: ' + e.message); });
-},
+            deleteCluster: function(contour, idx, name) {
+                if (!confirm('Удалить кластер «' + name + '» из контура ' + contour.toUpperCase() + '?\nЭто действие необратимо.')) return;
+                    fetch('/api/contours/' + contour + '/cluster/' + idx, { method: 'DELETE' })
+                .then(function(r) { return r.json(); })
+                .then(function(d) {
+                    if (d.ok) {
+                        toast('success', 'Кластер «' + name + '» удалён');
+                        addLog('INFO', 'Удалён кластер: ' + name + ' (' + contour + ')');
+                        App.renderClusterList();
+                        renderSettingsNodes();
+                    } else {
+                        toast('error', d.detail || 'Ошибка удаления');
+                    }
+                })
+                .catch(function(e) { toast('error', 'Ошибка: ' + e.message); });
+            },
 
             reloadYaml: function() {
                 var apiBase = getApiBase();

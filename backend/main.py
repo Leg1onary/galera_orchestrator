@@ -512,7 +512,24 @@ async def delete_cluster(contour: str, idx: int):
     _push_event("info", f"Cluster '{removed.get('name')}' deleted from '{contour}'", "ui")
     return {"ok": True}
 
-
+@app.patch("/api/contours/{contour}/cluster/{idx}")
+async def rename_cluster(contour: str, idx: int, request: Request):
+    """Rename a cluster. Body: {name: str}"""
+    body = await request.json()
+    new_name = (body.get("name") or "").strip()
+    if not new_name:
+        raise HTTPException(400, "name is required")
+    cfg = load_config()
+    clusters = cfg.get("contours", {}).get(contour, {}).get("clusters", [])
+    if idx >= len(clusters):
+        raise HTTPException(404, "Cluster not found")
+    old_name = clusters[idx].get("name")
+    clusters[idx]["name"] = new_name
+    save_config(cfg)
+    _invalidate_config_cache()
+    _push_event("info", f"Cluster renamed: '{old_name}' → '{new_name}' in '{contour}'", "ui")
+    return {"ok": True, "name": new_name}
+    
 # ── Nodes API (v2 — scoped to active cluster) ──────────────────────────────────
 
 @app.get("/api/nodes")
